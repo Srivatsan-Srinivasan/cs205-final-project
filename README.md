@@ -9,4 +9,4 @@ This repository will be used to commit code necessary for the final project of C
 
 4. Cory Williams
 
-Google Doc for the proposal : https://docs.google.com/document/d/1TDRw27l7FdhrP9uvl3nkBKtpUoAE_3HDyZus1whELEw/edit?usp=sharing
+Google slides for the proposal : https://docs.google.com/presentation/d/1oGa-gHbte9kbHfcSGOF94_0M-nd7p2r2Ky5b_dz2hU8/edit?usp=sharing
