@@ -5,12 +5,17 @@ Created on Fri Apr 19 09:12:31 2019
 @author: Aditya
 """
 
+import scipy
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 import numpy as np
 import scipy.io as sio
+import time
+import sys
 
-def multigrid(A, rhs, current_level, terminal_level, nrows, inds):
+def multigrid(A, rhs, current_level, terminal_level, nrows, nrows_2, inds, deeper=False):
+    if deeper:
+        nrows = nrows_2
     
  #   nrows = get_splits(A)
   #  inds = permuate(A)
@@ -50,6 +55,10 @@ def multigrid(A, rhs, current_level, terminal_level, nrows, inds):
     
     if(current_level == terminal_level):
         # Direct Solve via ILU
+        print(B0.shape)
+        print(B0.diagonal())
+        print(np.sum(B0.diagonal()))
+        print(np.min(B0.diagonal()))
         ILU = sparse.linalg.spilu(B0)
         (L1, U1) = (ILU.L, ILU.U)
         G1 = spsolve(U1.T, E0.T)
@@ -75,7 +84,7 @@ def multigrid(A, rhs, current_level, terminal_level, nrows, inds):
         # Descent donwards
         
         #Todo: Shouldn't hardcode 9
-        y0 = multigrid(A1, g0_prime, current_level + 1, terminal_level, 8, np.arange(len(g0_prime)))
+        y0 = multigrid(A1, g0_prime, current_level + 1, terminal_level, nrows, nrows_2, np.arange(len(g0_prime)), deeper=True)
         u0 = spsolve(U0,(f0_prime - W0 * y0))
         u0 = u0.reshape(len(u0), 1)
         y0 = np.concatenate((u0,y0))
@@ -88,10 +97,27 @@ def run_sample():
     data = sio.loadmat("rhs")
     rhs = data["rhs"]
 
-    res = multigrid(A, rhs, 1, 2, 32, np.arange(len(rhs)))
-    return(res)
+    res = multigrid(A, rhs, 1, 2, 32, 8, np.arange(len(rhs)))
+
+def run_sample_general(M_newton_fname, rhs_fname, nrows, nrows_2, inds, terminal_level=2, num_repeats=100):
+    data = sio.loadmat(M_newton_fname)
+    A = data["M_newton"]
+    data = sio.loadmat(rhs_fname)
+    rhs = data["rhs"]
+
+    timings = []
+    for _ in range(num_repeats):
+        start_time = time.time()
+        res = multigrid(A, rhs, 1, terminal_level, nrows, nrows_2, np.arange(len(rhs)))
+        total_time = time.time() - start_time
+        print('multigrid routine took: {}s.'.format(total_time))
+        timings.append(total_time)
+    print('average timing: {}s.'.format(np.mean(timings)))
+    print('std     timing: {}s.'.format(np.std(timings)))
 
 
+def run_sample_standard():
+    pass
 
 #8 = A
 #5= B
@@ -223,3 +249,7 @@ def create_M_newton():
         '''
     M_newton = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
     return(M_newton)
+
+if __name__ == '__main__':
+    print(sys.argv[0])
+    run_sample_general(M_newton_fname=sys.argv[1], rhs_fname=sys.argv[2], nrows=int(sys.argv[3]), nrows_2=int(sys.argv[4]), inds=False, terminal_level=int(sys.argv[5]))
