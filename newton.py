@@ -92,28 +92,13 @@ def multigrid(A, rhs, current_level, terminal_level,
     
     # On this level, set L0 = I, and U0 = B 
     #TODO: Should this always be the case for non -level 0? 
-    L0 = sparse.eye(B0.shape[0])
-    U0 = B0
-    #Since B0 is diagonal can do this
-    inv_U0 = sparse.diags(1/B0.diagonal())
-    
-    # Use Schur's complement
-    inv_L0 = L0
-    G0 = E0 * inv_U0;
-    W0 = inv_L0 * F0;
-    A1 = C0 - G0 * W0;
-
-    # Forward/backwards substiution 
-    f0_prime = spsolve(L0,f0);
-    f0_prime = f0_prime.reshape(len(f0_prime), 1)
-    g0_prime = g0 - G0 * f0_prime;
     
     if(current_level == terminal_level):
         # Direct Solve via ILU
         ILU = sparse.linalg.spilu(B0)
         (L1, U1) = (ILU.L, ILU.U)
-        G1 = spsolve(U1.T, E0.T)
-        W1 = spsolve(L1, F0)
+        G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
+        W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
         A2 = C0 - G1.T * W1 
         
         # Backsolve 
@@ -126,7 +111,7 @@ def multigrid(A, rhs, current_level, terminal_level,
         #More backsolve
         y1 = spsolve(A2, g1_prime)
         y1 = y1.reshape(len(y1), 1)
-        u1 = spsolve(U1,(f1_prime.reshape(len(f1_prime), 1) - W1 * y1))
+        u1 = sparse.linalg.spsolve_triangular(U1,(f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
         u1 = u1.reshape(len(u1), 1)
         y0 = np.concatenate((u1,y1))
         #Stick them together
@@ -134,10 +119,35 @@ def multigrid(A, rhs, current_level, terminal_level,
     else:
         # Descent donwards        
         #Todo: Shouldn't hardcode 9
+        L0 = sparse.eye(B0.shape[0])
+        U0 = B0
+        #Since B0 is diagonal can do this
+        inv_U0 = sparse.diags(1/B0.diagonal())
+        
+        # Use Schur's complement
+        inv_L0 = L0
+        G0 = E0 * inv_U0;
+        W0 = inv_L0 * F0;
+        A1 = C0 - G0 * W0;
+    
+        # Forward/backwards substiution 
+        f0_prime = sparse.linalg.spsolve_triangular(L0,f0);
+        f0_prime = f0_prime.reshape(len(f0_prime), 1)
+        g0_prime = g0 - G0 * f0_prime;
+
         y0 = multigrid(A1, g0_prime, current_level + 1, terminal_level, 'identity', 'given', pInput, nInput)
-        u0 = spsolve(U0,(f0_prime - W0 * y0))
+        u0 = sparse.linalg.spsolve_triangular(U0,(f0_prime - W0 * y0), False)
         u0 = u0.reshape(len(u0), 1)
         y0 = np.concatenate((u0,y0))
+        
+        
+        if(pInput != None):
+            new_col_inds = pInput[0][1]
+            y0_reorder = np.zeros_like(y0)
+            for i in range(0, len(y0)):
+                itemindex = np.where(new_col_inds==i)[0]
+                y0_reorder[i] = y0[itemindex]
+            y0 = y0_reorder            
         return y0
 
 
