@@ -10,6 +10,8 @@ from scipy.sparse.linalg import spsolve
 import numpy as np
 import scipy.io as sio
 
+import matplotlib.pyplot as plt
+
 
 #from enum import Enum     # for enum34, or the stdlib version
 
@@ -49,7 +51,11 @@ def multigrid(A, rhs, current_level, terminal_level,
         if(len(pInput) != terminal_level - current_level):
             raise ValueError("Needs to be consistent")
         else:
+            plt.spy(A)
+            plt.show()
             A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])
+            plt.spy(A)
+            plt.show()
             rhs = rhs[pInput[0][0]]
           #  pInput = pInput[1:]
           
