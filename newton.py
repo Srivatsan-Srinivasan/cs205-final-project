@@ -33,10 +33,10 @@ def permuate(A, rhs, pMethod, pInput = None):
 
 '''Taken from https://gist.github.com/vtraag/8b82e10e57d93eacc524'''
 def permute_sparse_matrix(M, orderRow, orderCol):
-  permuted_row = orderRow[M.row];
-  permuted_col = orderCol[M.col];
-  new_M = sparse.coo_matrix((M.data, (permuted_row, permuted_col)), shape=M.shape);
-  return new_M;
+    M2 = M.tocsr()
+    M2 = M2[:, orderCol]
+    M2 = M2[orderRow, :]
+    return M2;
 
     
 
@@ -51,11 +51,11 @@ def multigrid(A, rhs, current_level, terminal_level,
         if(len(pInput) != terminal_level - current_level):
             raise ValueError("Needs to be consistent")
         else:
-            plt.spy(A)
-            plt.show()
+           # plt.spy(A)
+           # plt.show()
             A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])
-            plt.spy(A)
-            plt.show()
+            #plt.spy(A)
+            #plt.show()
             rhs = rhs[pInput[0][0]]
           #  pInput = pInput[1:]
           
@@ -419,7 +419,7 @@ def find_reordering(model):
 #constr_data = sio.loadmat("5_bus_model_const")
 #rhs = sio.loadmat('rhs')['rhs']
 
-#M_n = create_M_newton(model_data, y0_data, constr_data)
+M_n = create_M_newton(model_data, y0_data, constr_data)
 
 #AB = run_sample()
 ABC = run_sample2()
