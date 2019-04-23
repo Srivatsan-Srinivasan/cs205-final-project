@@ -1,15 +1,20 @@
 ### HOW TO RUN THIS ON ODYSSEY
 
 1. Create a virtual environment CS205 in Odyssey (Since you can install packages only in that env.)
-conda create -n CS205 python=3.6
+
+$conda create -n CS205 python=3.6
 
 2. Move to that virtual env
-source activate CS205
 
-3. Install mpi4py : conda install mpi4py
+$source activate CS205
+
+3. Install mpi4py : 
+
+$conda install mpi4py
 
 4. Run bash script (which calls the python file, specifies env. to run from, specifies number of partitions etc.) 
-sbatch run.sbatch
+
+$sbatch run.sbatch
 
 Note : Check which partition you are in. The current code uses doshi-velez(my lab's partition). You will not have access to it.
 
