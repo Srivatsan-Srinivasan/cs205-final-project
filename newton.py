@@ -218,22 +218,26 @@ def create_M_newton(model_data, y0_data, constr_data):
         
         dim_th = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['th']][0][0]        
         dim_n = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['n']][0][0]
-            
-        LM = -np.diag((y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten())
+        
+            #    LM = -np.diag((y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten())
+
+        ab = (y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten()
+        LM = -1 * np.diag(ab)
+#        LM = -np.diag((y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten())
         LM = LM.dot(Dg)
         
         r1 = [np.zeros((dim_th, dim_th)),    Dg.T ,                       Ax.T]
         r2 = [LM,                 -np.diag(gval),               np.zeros((nieq, dim_n))]
         r3 = [Ax,                  np.zeros((dim_n, nieq)),     np.zeros((dim_n, dim_n))]
         
-        Ms.append(sparse.csc_matrix(np.block([r1, r2, r3])))
+        Ms.append(sparse.csr_matrix(np.block([r1, r2, r3])))
                 
-        Au = - np.eye(dim_n)
+        Au = -1 * np.eye(dim_n)
         lam_u_s = np.size(y0[0][0][dim_y0_mapping['lam_u']])
         r1 = [np.zeros((dim_th, dim_n)), np.zeros((dim_th, lam_u_s))]
         r2 = [np.zeros((nieq, dim_n)), np.zeros((nieq, lam_u_s))]
-        r3 = [-Au, np.zeros((dim_n, lam_u_s))]
-        Bu.append(sparse.csc_matrix(np.block([r1, r2, r3])))
+        r3 = [Au, np.zeros((dim_n, lam_u_s))]
+        Bu.append(sparse.csr_matrix(np.block([r1, r2, r3])))
     
     
     #Constructing the general matrix - need to know the variables
@@ -258,7 +262,7 @@ def create_M_newton(model_data, y0_data, constr_data):
     
     temp = np.diag(y0[0][0][dim_y0_mapping['lam_u']].flatten())
     r1 = [2*par_W, Dg_u.T]
-    r2 = [-temp.dot(Dg_u), -np.diag(g_u.flatten())]
+    r2 = [-temp.dot(Dg_u), -1 * np.diag(g_u.flatten())]
     Du = np.block([r1, r2])
     
     BB_nrows = dims_general[0][0][dims_general_mapping['BB_nrows']][0][0]
@@ -410,5 +414,13 @@ def find_reordering(model):
     
     return([new_rows_inds, new_column_inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
 
+#model_data = sio.loadmat("5_bus_model")
+#y0_data = sio.loadmat("5_bus_model_y0")
+#constr_data = sio.loadmat("5_bus_model_const")
+#rhs = sio.loadmat('rhs')['rhs']
+
+#M_n = create_M_newton(model_data, y0_data, constr_data)
+
 #AB = run_sample()
 ABC = run_sample2()
+#B = A.tocsr()
