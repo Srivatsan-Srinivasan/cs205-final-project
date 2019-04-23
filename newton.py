@@ -12,6 +12,9 @@ import scipy.io as sio
 
 import matplotlib.pyplot as plt
 
+import time
+import pyamg
+import os 
 
 #from enum import Enum     # for enum34, or the stdlib version
 
@@ -36,7 +39,7 @@ def permute_sparse_matrix(M, orderRow, orderCol):
     M2 = M.tocsr()
     M2 = M2[:, orderCol]
     M2 = M2[orderRow, :]
-    return M2;
+    return M2
 
     
 
@@ -102,7 +105,7 @@ def multigrid(A, rhs, current_level, terminal_level,
         A2 = C0 - G1.T * W1 
         
         # Backsolve 
-        f1_prime = spsolve(L1, f0)
+        f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
         f1_prime = f1_prime.reshape(len(f1_prime), 1)
         inner = G1.T * f1_prime
  #       inner = inner.reshape((len(inner), 1))
@@ -172,6 +175,75 @@ def run_sample2():
     mlSolve =  multigrid(M_n, rhs, 0, 1, 'given','given', [inds], nrows )
 
     return(mlSolve)
+
+
+def run_sample3(model_fname, rhs_fname, y0_fname, constr_fname):
+    model_data = sio.loadmat(model_fname)
+    y0_data = sio.loadmat(y0_fname)
+    constr_data = sio.loadmat(constr_fname)
+    rhs = sio.loadmat(rhs_fname)['rhs']
+
+    M_n = create_M_newton(model_data, y0_data, constr_data)
+    (inds, nrows) = find_reordering(model_data['model'])    
+    mlSolve =  multigrid(M_n, rhs, 0, 1, 'given','given', [inds], nrows )
+    return(mlSolve)
+
+
+def get_names(b, n, directory):
+    end_name = "%d_nbus%d_ncont" %(b, n)
+    model_fname = os.path.join(directory, "model_%s" % end_name)
+    rhs_fname = os.path.join(directory, "rhs_%s" % end_name)
+    y0_fname = os.path.join(directory, "y0_%s" % end_name)
+    constr_fname = os.path.join(directory, "constr_%s" % end_name)
+    
+    return(model_fname, rhs_fname, y0_fname, constr_fname)
+
+
+def get_res(A, b, x):
+    return(np.linalg.norm((A * x).flatten() - b.flatten()))
+    
+def run_many():
+    
+    buses = [5, 189]
+    ncont = [1, 2, 3, 4, 5]
+    
+    timing_dict = {"Multilevel" : {}, "Smooth_AMG" : {}, "direct" : {}}
+    residual_dict = {"Multilevel" : {}, "Smooth_AMG" : {}, "direct" : {}}
+    for b in buses: 
+        for n in ncont:
+            end_name = "%d_nbus%d_ncont" %(b, n)
+            #Multilevel
+            (model_fname, rhs_fname, y0_fname, constr_fname) = get_names(b, n, "Data")
+            rhs = sio.loadmat(rhs_fname)['rhs']
+#            model_fname, rhs_fname, y0_fname, constr_fname
+            
+            model_data = sio.loadmat(model_fname)
+            y0_data = sio.loadmat(y0_fname)
+            constr_data = sio.loadmat(constr_fname)
+            #rhs = sio.loadmat(rhs_fname)['rhs']
+            M_n = create_M_newton(model_data, y0_data, constr_data)
+
+            start_time = time.time()
+            res = run_sample3(model_fname, rhs_fname, y0_fname, constr_fname)
+            end_time = time.time() - start_time
+            resid = get_res(M_n, rhs, res)
+            timing_dict['Multilevel'][end_name] = end_time
+            residual_dict['Multilevel'][end_name] = resid
+            
+            
+            #Direct 
+            start_time = time.time()
+            res = sparse.linalg.lsqr(M_n, rhs)[0]
+            end_time = time.time() - start_time
+            resid = get_res(M_n, rhs, res)
+            
+            timing_dict['direct'][end_name] = end_time
+            residual_dict['direct'][end_name] = resid
+
+
+            
+            
+    return(timing_dict, residual_dict)            
 
 #8 = A
 #5= B
@@ -369,13 +441,11 @@ def find_reordering(model):
     inds['rcentP'] = np.arange(shift2, shift2 + 2*p)
     shift2 += 2 * p
     
-    print(shift)
     new_column_inds = np.zeros(shift, dtype = 'int')
     shift = 0
     for k in range(0, ncont + 1):
         (dims, dim_mapping) = get_specific_dim(model, k)
         dim_lam= dims[dim_mapping['lam']][0][0]
-        print(dim_lam)
         new_column_inds[shift:shift + dim_lam] = inds['deltaLambda'][k]
         shift += dim_lam
     
@@ -429,8 +499,9 @@ def find_reordering(model):
 #constr_data = sio.loadmat("5_bus_model_const")
 #rhs = sio.loadmat('rhs')['rhs']
 
-M_n = create_M_newton(model_data, y0_data, constr_data)
+#M_n = create_M_newton(model_data, y0_data, constr_data)
 
 #AB = run_sample()
-ABC = run_sample2()
+#ABC = run_sample2()
+akc = run_many()
 #B = A.tocsr()
