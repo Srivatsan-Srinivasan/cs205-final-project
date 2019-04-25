@@ -504,4 +504,62 @@ def find_reordering(model):
 #AB = run_sample()
 #ABC = run_sample2()
 akc = run_many()
+
+def fwd_back(b, L, U):
+    '''SImple forward bck sub'''
+    inter = sparse.linalg.spsolve_triangular(L, b)
+    x = sparse.linalg.spsolve_triangular(U, inter, False)
+    return(x)
+
+'''Handle getting Schur complement from L, U
+TODO Actually do it - for now just return'''
+def get_S(L, U, num = 33):
+    return(L[num:, num:], U[num:, num:])
+
+
+def get_interface(size):
+    return np.zeros((size, 1))
+
+
+def grimes_solver(Ai, fi, gi, niter, useMPI):
+    combined = np.concatenate((fi, gi))
+    ILU = sparse.linalg.spilu(Ai)
+    (L1, U1) = (ILU.L, ILU.U)
+    yi = 0
+    r = fwd_back(combined, L1, U1)
+    Pr = r[len(fi):]
+    V = np.zeros((len(Pr), niter + 1))
+    beta = np.linalg.norm(Pr)
+    v1 = Pr / beta
+    (LS, US) = get_S(L1, U1)
+    Hs = np.zeros((niter + 1, niter + 1))
+    V[:, 0] = v1.flatten()
+    for j in range(0, niter):
+        yinterface = get_interface(LS.shape[0])
+        t= fwd_back(yinterface, LS, US )
+        w = V[:, j] + t.T
+        for l in range(0, j):
+            Hs[l, j] = w.dot(V[:, l])
+            w = w - Hs[l, j] * (V[:, l])
+        Hs[j+1, j] = np.linalg.norm(w)
+        V[:, j+1]= w/ Hs[j+1, j]
+    Hs = Hs[:niter, :niter]
+    V = V[:, :niter]
+    z = np.linalg.lstsq(Hs, np.ones((niter)) * beta)[0]
+    yi = yi + V.dot(z)
+    yinterface = get_interface(LS.shape[0]) 
+    t = yinterface
+    gi = gi - t
+    combined = np.concatenate((fi, gi))
+    combined_soln = fwd_back(combined, L1, U1)
+    return(combined_soln[:len(fi)], combined_soln[len(fi):])
+    
+            
+    
+    
+
+    
+
+    return A
+
 #B = A.tocsr()
