@@ -554,12 +554,5 @@ def grimes_solver(Ai, fi, gi, niter, useMPI):
     combined_soln = fwd_back(combined, L1, U1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
     
-            
-    
-    
-
-    
-
-    return A
 
 #B = A.tocsr()
