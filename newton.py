@@ -15,7 +15,9 @@ import matplotlib.pyplot as plt
 import time
 import pyamg
 import os 
+from functools import reduce
 
+#from mpi4py import MPI
 #from enum import Enum     # for enum34, or the stdlib version
 
 #PMethod= Enum('PMethod', 'given')
@@ -36,32 +38,42 @@ def permuate(A, rhs, pMethod, pInput = None):
 
 '''Taken from https://gist.github.com/vtraag/8b82e10e57d93eacc524'''
 def permute_sparse_matrix(M, orderRow, orderCol):
-    M2 = M.tocsr()
+    M2 = M.tocsc()
     M2 = M2[:, orderCol]
     M2 = M2[orderRow, :]
     return M2
 
     
 
-def multigrid(A, rhs, current_level, terminal_level,
-              pMethod = 'identity', nMethod = 'given', pInput = None, nInput = None ):
+def multigrid_wrapper(A, rhs, init_level, terminal_level, pMethod = 'identity', nMethod = 'given', 
+                      pInput = None, nInput = None, useTerminalMPI = False):
+    if(useTerminalMPI and MPI.COMM_WORLD.Get_size() > 1):
+        nCnt = MPI.COMM_WORLD.Get_size()
+        rank = MPI.COMM_WORLD.Get_rank()
+        if(rank == 0):
+            to_distribute
+    else:
+        return(multigrid(A, rhs, init_level, terminal_level, pMethod = pMethod, 
+                         nMethod = nMethod, pInput = pInput, nInput = nInput, useTerminalMPI = False, 
+                         hack = False))
+        
+        
+        
 
- #   assert(PMethod[pMethod])
- #   assert(nrowMethod[nMethod])
-
-    # TODO: Should check if it's part of the enum     
+def hack_multigrid(A, rhs, current_level, terminal_level,
+              pMethod = 'identity', nMethod = 'given', pInput = None, nInput = None, 
+              useTerminalMPI = False, model = None):
+    '''Please dont use this unnless, necessary..this is really meant to just get a simple way
+    of this to work for MPI'''
+    
+    
     if(pMethod == 'given'):
         if(len(pInput) != terminal_level - current_level):
             raise ValueError("Needs to be consistent")
         else:
-           # plt.spy(A)
-           # plt.show()
             A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])
-            #plt.spy(A)
-            #plt.show()
             rhs = rhs[pInput[0][0]]
-          #  pInput = pInput[1:]
-          
+
           #TODO Should be a bit more dynamic put will set to identity: 
             pMethod = 'identity'
         
@@ -74,11 +86,111 @@ def multigrid(A, rhs, current_level, terminal_level,
             if(terminal_level != current_level):
                 nInput = nInput[1:]
     
- #   nrows = get_splits(A)
-  #  inds = permuate(A)
-#    A = A[:, inds]
- #   A = A[inds, :]
-  #  rhs = rhs[inds]
+    # Split input matrix based on nrows    
+    #TODO: Actual algorithm for nrwos.
+    A = A.tocsr()
+    B0 = A[:nrows, :nrows]
+    F0 = A[:nrows, nrows:]
+    E0 = A[nrows:, :nrows]
+    C0 = A[nrows:, nrows:]
+    
+    # Same for f0. f0 is the stuff that can be computed independently, 
+    # g0 is the stuff that can't be
+    f0 = rhs[:nrows]
+    g0 = rhs[nrows:]
+    
+    L0 = sparse.eye(B0.shape[0])
+    U0 = B0
+    #Since B0 is diagonal can do this
+    inv_U0 = sparse.diags(1/B0.diagonal())
+        
+        # Use Schur's complement
+    inv_L0 = L0
+    G0 = E0 * inv_U0;
+    W0 = inv_L0 * F0;
+    A1 = C0 - G0 * W0;
+    
+        # Forward/backwards substiution 
+    f0_prime = sparse.linalg.spsolve_triangular(L0,f0);
+    f0_prime = f0_prime.reshape(len(f0_prime), 1)
+    g0_prime = g0 - G0 * f0_prime;
+
+
+    nrows2 = nInput[0]
+    B1 = A1[:nrows2, :nrows2]
+    F1 = A1[:nrows2, nrows2:]
+    E1 = A1[nrows2:, :nrows2]
+    C1 = A1[nrows2:, nrows2:]
+    
+    f1 = g0_prime[:nrows2]
+    g1 = g0_prime[nrows2:]
+    
+    
+    # At this point either use single process or multiprocess
+    if(useTerminalMPI):
+        r2 = split_to_distributed(model, Ar, g0_prime, 1)
+        y0 = run_distributed(r2)
+#        y0 = distrbuted_multigrid(B1, model)
+    else:
+        ILU = sparse.linalg.spilu(B1)
+        (L1, U1) = (ILU.L, ILU.U)
+        G1 = sparse.linalg.spsolve_triangular(U1.T, (E1.T).todense())
+        W1 = sparse.linalg.spsolve_triangular(L1, F1.todense())
+        A2 = C1 - G1.T * W1 
+        f1_prime = sparse.linalg.spsolve_triangular(L1, f1)
+        f1_prime = f1_prime.reshape(len(f1_prime), 1)
+        inner = G1.T * f1_prime
+     #       inner = inner.reshape((len(inner), 1))
+        g1_prime = g1 - inner
+            
+            #More backsolve
+        y1 = spsolve(A2, g1_prime)
+        y1 = y1.reshape(len(y1), 1)
+        u1 = sparse.linalg.spsolve_triangular(U1,(f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
+        u1 = u1.reshape(len(u1), 1)
+        y0 = np.concatenate((u1,y1))    
+        u0 = sparse.linalg.spsolve_triangular(U0,(f0_prime - W0 * y0), False)
+        u0 = u0.reshape(len(u0), 1)
+        y0 = np.concatenate((u0,y0))
+        
+    if(pInput != None):
+        new_col_inds = pInput[0][1]
+        y0_reorder = np.zeros_like(y0)
+        for i in range(0, len(y0)):
+            itemindex = np.where(new_col_inds==i)[0]
+            y0_reorder[i] = y0[itemindex]
+        y0 = y0_reorder            
+    return y0
+
+    
+   
+    
+def multigrid(A, rhs, current_level, terminal_level,
+              pMethod = 'identity', nMethod = 'given', pInput = None, nInput = None, 
+              useTerminalMPI = False, model = None, hack = False):
+    if(hack):
+        return(hack_multigrid(A, rhs, current_level, terminal_level, pMethod=pMethod, 
+                                 nMethod = nMethod, pInput = pInput, nInput = nInput, 
+                                 useTerminalMPI = useTerminalMPI, model= model))
+    # TODO: Should check if it's part of the enum     
+    if(pMethod == 'given'):
+        if(len(pInput) != terminal_level - current_level):
+            raise ValueError("Needs to be consistent")
+        else:
+            A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])
+            rhs = rhs[pInput[0][0]]
+
+          #TODO Should be a bit more dynamic put will set to identity: 
+            pMethod = 'identity'
+        
+        
+    if(nMethod == 'given'):
+        if(len(nInput) != terminal_level - current_level + 1):
+            raise ValueError("Needs to be consistent")
+        else:
+            nrows = nInput[0]
+            if(terminal_level != current_level):
+                nInput = nInput[1:]
     
     # Split input matrix based on nrows    
     #TODO: Actual algorithm for nrwos.
@@ -98,6 +210,8 @@ def multigrid(A, rhs, current_level, terminal_level,
     
     if(current_level == terminal_level):
         # Direct Solve via ILU
+        
+
         ILU = sparse.linalg.spilu(B0)
         (L1, U1) = (ILU.L, ILU.U)
         G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
@@ -155,6 +269,7 @@ def multigrid(A, rhs, current_level, terminal_level,
 
 
 def run_sample():
+    '''Easy test - no permutaion'''
     data = sio.loadmat("M_newton")
     A = data["M_newton"]
     data = sio.loadmat("rhs")
@@ -164,16 +279,18 @@ def run_sample():
     return(res)
 
 def run_sample2():
-    model_data = sio.loadmat("5_bus_model")
-    y0_data = sio.loadmat("5_bus_model_y0")
-    constr_data = sio.loadmat("5_bus_model_const")
-    rhs = sio.loadmat('rhs')['rhs']
+    '''More complicated - actually create block diagnal matrix and permute'''
+    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
+    model_data = sio.loadmat(mname)
+    y0_data = sio.loadmat(yname)
+    constr_data = sio.loadmat(cname)
+    rhs = sio.loadmat(rhsname)['rhs']
 
     M_n = create_M_newton(model_data, y0_data, constr_data)
     (inds, nrows) = find_reordering(model_data['model'])    
 
-    mlSolve =  multigrid(M_n, rhs, 0, 1, 'given','given', [inds], nrows )
-
+    mlSolve =  multigrid(M_n, rhs, 0, 1, 'given','given', [inds], nrows, model= model_data['model'] )
+    print(np.linalg.norm(M_n.dot(mlSolve) - rhs))
     return(mlSolve)
 
 
@@ -200,10 +317,11 @@ def get_names(b, n, directory):
 
 
 def get_res(A, b, x):
+    '''Calc the residual'''
     return(np.linalg.norm((A * x).flatten() - b.flatten()))
     
 def run_many():
-    
+    '''Compute a timing table'''
     buses = [5, 189]
     ncont = [1, 2, 3, 4, 5]
     
@@ -252,6 +370,7 @@ def run_many():
 
 
 def make_mapping(d):
+    '''Takes a model like data structure and returns a mapping'''
     key = d.dtype.fields.keys()
     val = np.arange(len(key))
     mapping = {k:v for k, v in zip(key, val)}
@@ -259,12 +378,15 @@ def make_mapping(d):
 
 
 def get_model_specific(model, cont_num):
+    '''Get the constraint specific model information'''
     return model[0][0][1][0][cont_num]
 
 
 def create_M_newton(model_data, y0_data, constr_data):
+    '''Takes in model/y0/cosntr data and constructs
+    the newton block diagonal matrix as consistent with the paper.'''
 
-    #TODO - should have these as arguments....
+
     model = model_data['model']
     y0 = y0_data['y0']
     
@@ -301,11 +423,8 @@ def create_M_newton(model_data, y0_data, constr_data):
         dim_th = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['th']][0][0]        
         dim_n = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['n']][0][0]
         
-            #    LM = -np.diag((y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten())
-
         ab = (y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten()
         LM = -1 * np.diag(ab)
-#        LM = -np.diag((y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten())
         LM = LM.dot(Dg)
         
         r1 = [np.zeros((dim_th, dim_th)),    Dg.T ,                       Ax.T]
@@ -382,12 +501,126 @@ def create_M_newton(model_data, y0_data, constr_data):
 
 
 def get_specific_dim(model, cons_num):
+    '''Get the dimensions of primal/dual variables associated with given constraint'''
     model_specific = get_model_specific(model, cons_num)
     info_mapping= make_mapping(model_specific)
     dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
     dims = model_specific[0][0][info_mapping['dim']][0][0]
     return((dims, dim_mapping))
 
+
+def find_regrouping(model):
+    '''For the last level after eliminating lambda, now group so that 
+    the thetas/nus are grouped based on contigency number. This is similar 
+    to the other ordering function and should find a way to refactor'''
+    
+    
+    #TODO: Mixed up the row and col here :(
+    ncont = len(model[0][0][1][0]) - 1
+    inds = {'deltaTheta' : [], 'deltaNu' : [], 
+            'rDual': [],  'rPri' : []}
+    
+    shift = 0;
+    shift2 = 0;
+    for cons_num in range(0, ncont + 1):
+        model_specific = get_model_specific(model, cons_num)
+        info_mapping= make_mapping(model_specific)
+        dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
+        dims = model_specific[0][0][info_mapping['dim']][0][0]
+        
+        dim_th = dims[dim_mapping['th']][0][0]
+        dim_neq = dims[dim_mapping['neq']][0][0]        
+                
+        inds['deltaTheta'].append(np.arange(shift, dim_th + shift))
+        shift = shift + dim_th
+        inds['rDual'].append(np.arange(shift2, dim_th + shift2))
+        shift2 += dim_th
+
+    
+    general_mapping= make_mapping(model[0][0][0][0][0])
+    dims_general = model[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)    
+    p = dims_general[0][0][dims_general_mapping['p']][0][0]
+    inds['deltaP'] = np.arange(shift, p+shift)
+    shift += p
+
+        
+    for cons_num in range(0, ncont + 1):
+        model_specific = get_model_specific(model, cons_num)
+        info_mapping= make_mapping(model_specific)
+        dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
+        dims = model_specific[0][0][info_mapping['dim']][0][0]
+        
+        dim_th = dims[dim_mapping['th']][0][0]
+        dim_neq = dims[dim_mapping['neq']][0][0]        
+                
+        inds['deltaNu'].append(np.arange(shift, dim_neq + shift))
+        shift += dim_neq
+        
+        inds['rPri'].append(np.arange(shift2, dim_neq + shift2))
+        shift2 += dim_neq
+    
+    inds['rdualP'] = np.arange(shift2, shift2 + p)
+    shift2 += p
+  
+    inds_info_col = [np.concatenate((x1, y1)) for x1, y1 in zip(inds['deltaTheta'], inds['deltaNu'])]
+    inds_info_col.append(inds['deltaP'])
+    inds_info_row = [np.concatenate((x1, y1)) for x1, y1 in zip(inds['rDual'], inds['rPri'])]
+    inds_info_row.append(inds['rdualP'])
+    
+    return(inds_info_col, inds_info_row, inds)
+
+
+def split_to_distributed(model, Ar, rhsr, num_cont):
+    '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
+    (cols, rows, inds) = find_regrouping(model)
+    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
+    rhsr = rhsr[np.concatenate(cols)]
+    
+    to_split_arr = []
+    rhs_split_arr = []
+    start_r = 0
+    start_c = 0
+    for i in range(0, num_cont + 1):
+        (i_row, i_col) = (len(rows[i]), len(cols[i]))
+        to_split_arr.append(Ar2[start_r: start_r+i_row, start_c:start_c+i_col])
+        rhs_split = rhsr[start_r:start_r + i_row]
+        inter = len(inds['rDual'][i])
+        fi = rhs_split[:inter]
+        gi = rhs_split[inter:]
+        rhs_split_arr.append((fi, gi))
+        start_r += i_row
+        start_c += i_col
+    check1 = Ar2[:, start_c:]
+    check2 = Ar2[start_r:, :]
+    assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
+    Cp = Ar2[start_r:, start_c:]
+    rhs_left = rhsr[start_r:]
+    to_split_arr.insert(0, Cp)
+    rhs_split_arr.insert(0, rhs_left)
+    Hps_outer = []
+    Hps_inner = []
+    start_c = 0
+    for i in range(0, num_cont + 1):
+        #(i_col) = (len(cols[i]))
+        th_len = len(inds['deltaTheta'][i])
+        th_nu = len(inds['deltaNu'][i])
+        Hps_inner.append(Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
+        Hps_outer.append(Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
+    Hps_outer.insert(0, Hps_inner)
+    
+    return(to_split_arr, rhs_split_arr, Hps_outer)
+
+    
+    
+   # to_split_arr.append()
+    
+def distrubted_calc(model, A, rhs, num_cont):
+    (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
+    grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
+    return(grouped)
+    
+    
 def find_reordering(model):
     '''The algorithm here is to permute to get the same type of variables together. 
     Roughtly speaking instead of grouping by contingency directly we want to group by 
@@ -458,6 +691,13 @@ def find_reordering(model):
         dim_th = dims[dim_mapping['th']][0][0]
         new_column_inds[shift:dim_th + shift] = inds['deltaTheta'][k]
         shift += dim_th
+        
+        '''
+        dim_neq = dims[dim_mapping['neq']][0][0]          
+        new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
+        shift += dim_neq
+        '''
+
     
     for k in range(0, ncont + 1):
         (dims, dim_mapping) = get_specific_dim(model, k)
@@ -484,16 +724,35 @@ def find_reordering(model):
         dim_th= dims[dim_mapping['th']][0][0]
         new_rows_inds[shift2:dim_th + shift2] = inds['rDual'][k]
         shift2 += dim_th
+        
+        '''
+        dim_neq= dims[dim_mapping['neq']][0][0]
+        new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
+        shift2 += dim_neq
+        '''
+    
     new_rows_inds[shift2:p + shift2] = inds['rdualP']
     shift2 += p
+    
     for k in range(0, ncont + 1):
         (dims, dim_mapping) = get_specific_dim(model, k)
         dim_neq= dims[dim_mapping['neq']][0][0]
         new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
         shift2 += dim_neq
     
+
+    
     return([new_rows_inds, new_column_inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
 
+'''
+def run_distributed(toSend, toReceive):
+        toReceive = None
+        information = MPI.COMM_WORLD.scatter(toSend, toReceive root = 0)
+         
+
+        r2 = split_to_distributed(model, Ar, g0_prime, 1)
+        y0 = run_distributed(r2)
+'''
 #model_data = sio.loadmat("5_bus_model")
 #y0_data = sio.loadmat("5_bus_model_y0")
 #constr_data = sio.loadmat("5_bus_model_const")
@@ -502,8 +761,9 @@ def find_reordering(model):
 #M_n = create_M_newton(model_data, y0_data, constr_data)
 
 #AB = run_sample()
-#ABC = run_sample2()
-akc = run_many()
+#ABCD = run_sample2()
+ABCD_2 = run_sample2()
+#akc = run_many()
 
 def fwd_back(b, L, U):
     '''SImple forward bck sub'''
@@ -517,11 +777,27 @@ def get_S(L, U, num = 33):
     return(L[num:, num:], U[num:, num:])
 
 
-def get_interface(size):
+def get_interface(size, useMPI = False, toSend = None):
+    if(useMPI):
+        nproc = MPI.COMM_WORLD.Get_size()
+        iproc = MPI.COMM_WORLD.Get_rank()
+        if(iproc != 0):
+            interface = MPI.COMM_WORLD.sendrecv(sendobj = [toSend, MPI.DOUBLE], dest = 0, source = 0, tag = INTERFACE_TAG)            
+        else:            
+            all_interface = MPI.COMM_WORLD.bcast(toSend, root = 0, tag = INTERFACE_TAG)
+            data = MPI.COMM_WORLD.gather(toSend, root = 0, tag = INTERFACE_TAG)
+           # toRecv = MPI.COMM_WORLD.gather()
+            
+            
+            
+
+        return np.zeros((size, 1))
     return np.zeros((size, 1))
 
 
-def grimes_solver(Ai, fi, gi, niter, useMPI):
+    
+
+def grimes_solver(Ai, fi, gi, niter, useMPI = False):
     combined = np.concatenate((fi, gi))
     ILU = sparse.linalg.spilu(Ai)
     (L1, U1) = (ILU.L, ILU.U)
@@ -535,7 +811,7 @@ def grimes_solver(Ai, fi, gi, niter, useMPI):
     Hs = np.zeros((niter + 1, niter + 1))
     V[:, 0] = v1.flatten()
     for j in range(0, niter):
-        yinterface = get_interface(LS.shape[0])
+        yinterface = get_interface(LS.shape[0], useMPI)
         t= fwd_back(yinterface, LS, US )
         w = V[:, j] + t.T
         for l in range(0, j):
@@ -547,12 +823,132 @@ def grimes_solver(Ai, fi, gi, niter, useMPI):
     V = V[:, :niter]
     z = np.linalg.lstsq(Hs, np.ones((niter)) * beta)[0]
     yi = yi + V.dot(z)
-    yinterface = get_interface(LS.shape[0]) 
+    yinterface = get_interface(LS.shape[0],  useMPI) 
     t = yinterface
     gi = gi - t
     combined = np.concatenate((fi, gi))
     combined_soln = fwd_back(combined, L1, U1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
     
+def structure(model_path):
+    nproc = MPI.COMM_WORLD.Get_size()
+    rank = MPI.COMM_WORLD.Get_rank()
+    inode = MPI.Get_processor_name()
+    toSend = None
+    if(rank == 0):
+        toSend = distrubted_calc(model_path)
+    toReceive = np.empty((toSend.shape[1]))
+    MPI.COMM_WORLD.scatter(toSend, toReceive, tag = DISTRIBUTED_TAG)
+    if(rank == 0):
+        localSol = grmes_wrapper_nonlocal(toReceive)
+    else:
+        localSol = grmes_wrapper_local(toReceive)
+    
+#def stuff_to_send():
+    '''We need to send the followign: 
+        To the non-local node we just need to keep all the H_{i, p} as well as determining
+        the C_p and the last g_{i, p}
+        
+        At each step we receive all the Vs from the local nodes and compute 
+        a sum over H_{i,p} * y_i. We send the current nu
+        
+        For the local nodes, we need to send its H_{i, p}, it's A_i and it's 
+        fi, gi. 
+        For each iteration 
+        
+        At each step we 
+'''
 
-#B = A.tocsr()
+
+def split_bigM(A, nrows, ncont, nprocess, model):
+    B0 = A[:nrows, :nrows]
+    F0 = A[:nrows, nrows:]
+    E0 = A[nrows:, :nrows]
+    C0 = A[nrows:, nrows:]
+    
+   # new_col_inds = shift_C0(C0, ncont, inds)
+    #C0 = C0[:, new_col_inds]
+    #F0 = F0[:, new_col_inds]
+    (Bs, Fs, Es, Cs) = ([], [], [], [])
+    
+    (start_b, start_f_col, start_f_row, start_e_col, start_e_row, start_c_col, start_c_row) = (0, 0, 0, 0, 0, 0, 0)
+    for k in range(0, ncont + 1):
+        l_cut = len(inds['deltaLambda'][k])
+        Bs.append(B0[start_b:start_b + l_cut, start_b:start_b + l_cut])
+        start_b += l_cut
+        th_cut = (len(inds['deltaTheta'][k]))
+        Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+        start_f_row += l_cut
+        start_f_col += th_cut
+        Es.append(E0[:, start_e_col:start_e_col + l_cut])
+        start_e_row += l_cut
+        start_e_col += l_cut
+        temp_C0 = C0[start_c_row:start_c_row+th_cut, :]
+        (r, c) = temp_C0.shape
+        CO_above= sparse.csr_matrix((start_c_row, c))
+        CO_below = sparse.csr_matrix((c - r - start_c_row, c))
+        CO_all = sparse.vstack([CO_above, temp_C0, CO_below, ])
+        Cs.append(CO_all)
+        start_c_row += th_cut
+        
+    temp_C0 = C0[start_c_row:, :]
+    (r, c) = temp_C0.shape
+    CO_above= sparse.csr_matrix((start_c_row, c))
+    CO_below = sparse.csr_matrix((c - r - start_c_row, c))
+    CO_all = sparse.vstack([CO_above, temp_C0, CO_below])
+    Cs.append(CO_all)
+    
+    l_cut_p = len(inds['deltaLambdaP'])
+    Bs.append(B0[start_b:start_b + l_cut_p, start_b:start_b + l_cut_p])
+    Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+    Es.append(E0[:, start_e_col:])
+    
+    As = []
+    for i in range(0, len(Fs)):
+        c = Cs[i]
+        b = Bs[i]
+        e = Es[i]
+        f = Fs[i]
+        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
+        As.append(temp_res)
+    
+    
+        
+   
+def shift_C0(C, ncont, inds):
+    total_th = reduce(lambda x, y : len(x) + len(y), inds['deltaTheta'])
+    
+    new_col_inds = np.zeros(C.shape[0])
+    shift = 0
+    shift2 = 0
+    shift3 = 0
+    for k in range(ncont + 1):
+        dNu = len(inds['deltaNu'][k])
+        dTh = len(inds['deltaTheta'][k])
+        new_col_inds[shift:shift +dNu] = np.arange(shift2 + total_th, shift2 + total_th + dNu)
+        shift += dNu
+        new_col_inds[shift:shift+dTh] = np.arange(shift3, shift3 + dTh)
+        shift2 += dNu
+        shift += dTh
+        shift3 += dTh
+    dP = len(inds['deltaP'])
+    new_col_inds[shift:shift+dP] = np.arange(shift, shift + dP)
+    return(new_col_inds)
+#    C2 = C[:, new_col_inds]
+ #   return(C2)
+        
+
+#
+#if __name__ == __main__:    
+#    nproc = MPI.COMM_WORLD.Get_size()
+#    iproc = MPI.COMM_WORLD.Get_rank()
+#    inode = MPI.Get_processor_name()
+#    if iproc == 0: 
+#        run_main():
+#    else: 
+#        side_process_path(iproc, nproc)
+#	MPI.COMM_WORLD.Barrier()
+#	if iproc == i :
+#		print('Rank %d out of %d' % (iproc,nproc))
+#
+#MPI.Finalize()
