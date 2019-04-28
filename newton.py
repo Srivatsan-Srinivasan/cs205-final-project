@@ -55,10 +55,9 @@ def multigrid(A, rhs, current_level, terminal_level, nrows, nrows_2, inds, deepe
     
     if(current_level == terminal_level):
         # Direct Solve via ILU
-        print(B0.shape)
-        print(B0.diagonal())
-        print(np.sum(B0.diagonal()))
-        print(np.min(B0.diagonal()))
+        
+        B0 = B0 + scipy.sparse.eye(B0.shape[0])*1e-6
+
         ILU = sparse.linalg.spilu(B0)
         (L1, U1) = (ILU.L, ILU.U)
         G1 = spsolve(U1.T, E0.T)
@@ -84,6 +83,8 @@ def multigrid(A, rhs, current_level, terminal_level, nrows, nrows_2, inds, deepe
         # Descent donwards
         
         #Todo: Shouldn't hardcode 9
+        if current_level >= 2:
+            nrows_2 /= 2
         y0 = multigrid(A1, g0_prime, current_level + 1, terminal_level, nrows, nrows_2, np.arange(len(g0_prime)), deeper=True)
         u0 = spsolve(U0,(f0_prime - W0 * y0))
         u0 = u0.reshape(len(u0), 1)
@@ -99,7 +100,7 @@ def run_sample():
 
     res = multigrid(A, rhs, 1, 2, 32, 8, np.arange(len(rhs)))
 
-def run_sample_general(M_newton_fname, rhs_fname, nrows, nrows_2, inds, terminal_level=2, num_repeats=100):
+def run_sample_general(M_newton_fname, rhs_fname, nrows, nrows_2, inds, terminal_level=2, num_repeats=3):
     data = sio.loadmat(M_newton_fname)
     A = data["M_newton"]
     data = sio.loadmat(rhs_fname)
