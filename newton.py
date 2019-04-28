@@ -574,9 +574,11 @@ def find_regrouping(model):
 
 def split_to_distributed(model, Ar, rhsr, num_cont):
     '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
-    (cols, rows, inds) = find_regrouping(model)
-    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
-    rhsr = rhsr[np.concatenate(cols)]
+    
+    Ar2 = Ar
+#    (cols, rows, inds) = find_regrouping(model)
+#    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
+#    rhsr = rhsr[np.concatenate(cols)]
 
     to_split_arr = []
     rhs_split_arr = []
@@ -974,7 +976,15 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     #print("I am proc %d and I've received some data" % iproc)
     (res) = local_schurs(local_data)
     combined = MPI.COMM_WORLD.gather(res, root=0)
-    return(combined)
+    split_solve = None
+    if(iproc = 0):
+        newA = reduce(lambda x, y : x + y, combined[0])
+        newG = reduce(lambda x, y : x + y, combined[1])
+        split_solve = split_to_distributed(model, Ar, rhsr, num_cont):
+    
+    local_sol = MPI.COMM_WORLD.scatter(split_solve, root = 0)
+    combined2 = MPI.COMM_WORLD.gather(local_sol, root = 0)
+    return(combined2)
 
 
 def run_run_sample4():
