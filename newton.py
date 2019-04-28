@@ -743,7 +743,7 @@ def find_reordering(model):
     '''
 
     
-    return([new_rows_inds, new_column_inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
+    return([new_rows_inds, new_column_inds, inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
 
 '''
 def run_distributed(toSend, toReceive):
@@ -763,7 +763,7 @@ def run_distributed(toSend, toReceive):
 
 #AB = run_sample()
 #ABCD = run_sample2()
-ABCD_two = run_sample2()
+#ABCD_two = run_sample2()
 #akc = run_many()
 
 def fwd_back(b, L, U):
@@ -777,26 +777,6 @@ TODO Actually do it - for now just return'''
 def get_S(L, U, num = 33):
     return(L[num:, num:], U[num:, num:])
 
-
-def get_interface(size, useMPI = False, toSend = None):
-    if(useMPI):
-        nproc = MPI.COMM_WORLD.Get_size()
-        iproc = MPI.COMM_WORLD.Get_rank()
-        if(iproc != 0):
-            interface = MPI.COMM_WORLD.sendrecv(sendobj = [toSend, MPI.DOUBLE], dest = 0, source = 0, tag = INTERFACE_TAG)            
-        else:            
-            all_interface = MPI.COMM_WORLD.bcast(toSend, root = 0, tag = INTERFACE_TAG)
-            data = MPI.COMM_WORLD.gather(toSend, root = 0, tag = INTERFACE_TAG)
-           # toRecv = MPI.COMM_WORLD.gather()
-            
-            
-            
-
-        return np.zeros((size, 1))
-    return np.zeros((size, 1))
-
-
-    
 
 def grimes_solver(Ai, fi, gi, niter, useMPI = False):
     combined = np.concatenate((fi, gi))
@@ -861,27 +841,35 @@ def structure(model_path):
 '''
 
 
-def split_bigM(A, nrows, ncont, nprocess, model):
+def split_bigM(A, rhs, nrows, ncont, nprocess, model, inds):
     B0 = A[:nrows, :nrows]
     F0 = A[:nrows, nrows:]
     E0 = A[nrows:, :nrows]
     C0 = A[nrows:, nrows:]
     
+    f0 = rhs[:nrows]
+    g0 = rhs[nrows:]
 #    new_col_inds = shift_C0(C0, ncont, inds)
 #    C0 = C0[:, new_col_inds]
 #    F0 = F0[:, new_col_inds]
-    (Bs, Fs, Es, Cs) = ([], [], [], [])
+    (Bs, Fs, Es, Cs, gs, fs, us) = ([], [], [], [], [], [], [])
     
     (start_b, start_f_col, start_f_row, start_e_col, start_e_row, start_c_col, start_c_row) = (0, 0, 0, 0, 0, 0, 0)
     for k in range(0, ncont + 1):
         l_cut = len(inds['deltaLambda'][k])
         Bs.append(B0[start_b:start_b + l_cut, start_b:start_b + l_cut])
+        us.append(f0[start_b:start_b + l_cut])
         start_b += l_cut
         th_cut = (len(inds['deltaTheta'][k]))
+        
         Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+        fs.append(f0[start_f_row:start_f_row + l_cut])
+        
         start_f_row += l_cut
         start_f_col += th_cut
         Es.append(E0[:, start_e_col:start_e_col + l_cut])
+        
+        
         start_e_row += l_cut
         start_e_col += l_cut
         temp_C0 = C0[start_c_row:start_c_row+th_cut, :]
@@ -890,6 +878,14 @@ def split_bigM(A, nrows, ncont, nprocess, model):
         CO_below = sparse.csr_matrix((c - r - start_c_row, c))
         CO_all = sparse.vstack([CO_above, temp_C0, CO_below, ])
         Cs.append(CO_all)
+        
+        temp_g = g0[start_c_row:start_c_row+th_cut]
+       # (r, c) = temp_g.shape
+        g0_above= sparse.csr_matrix((start_c_row, 1))
+        g0_below = sparse.csr_matrix((c - r - start_c_row, 1))
+        g0_all = sparse.vstack([g0_above, sparse.csc_matrix(temp_g), g0_below, ])
+        gs.append(g0_all)
+        
         start_c_row += th_cut
         
     temp_C0 = C0[start_c_row:, :]
@@ -898,22 +894,39 @@ def split_bigM(A, nrows, ncont, nprocess, model):
     CO_below = sparse.csr_matrix((c - r - start_c_row, c))
     CO_all = sparse.vstack([CO_above, temp_C0, CO_below])
     Cs.append(CO_all)
-    
+
+    temp_g = g0[start_c_row:]
+    g0_above= sparse.csr_matrix((start_c_row, 1))
+    g0_below = sparse.csr_matrix((c - r - start_c_row, 1))
+    g0_all = sparse.vstack([g0_above, sparse.csc_matrix(temp_g), g0_below, ])
+    gs.append(g0_all)
+
+    #gs.append(g0[start_e_col])
+
     l_cut_p = len(inds['deltaLambdaP'])
     Bs.append(B0[start_b:start_b + l_cut_p, start_b:start_b + l_cut_p])
+    us.append(f0[start_b:start_b + l_cut_p])
+
     Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+    fs.append(f0[start_f_row:start_f_row + l_cut])
     Es.append(E0[:, start_e_col:])
+    
+    
+    to_send = [(b, f, e, c, f, g, u) for (b, f, e, c, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
     
     As = []
     for i in range(0, len(Fs)):
-        c = Cs[i]
+      #  c = Cs[i]
         b = Bs[i]
         e = Es[i]
-        f = Fs[i]
-        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
+        f = fs[i]
+        g = gs[i]
+#        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
+        temp_res = g - e * sparse.diags(1/b.diagonal()) * f
         As.append(temp_res)
+    return(to_send, As)
     
-
+#ts = split_bigM(A0_shuffle, rhs_shuffle, 32, 1, 1, model, inds)
 def revert_ordering(ordering):
     new_col_inds = ordering
  #   y0_reorder = np.zeros_like(orig)
@@ -926,6 +939,46 @@ def revert_ordering(ordering):
     return(inds)
         
    
+
+def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
+    nproc = MPI.COMM_WORLD.Get_size()
+    iproc = MPI.COMM_WORLD.Get_rank()
+    inode = MPI.Get_processor_name()
+    splits = None
+    if(iproc == 0):
+        model_data = sio.loadmat(model_fname)
+        y0_data = sio.loadmat(y0_fname)
+        constr_data = sio.loadmat(constr_fname)
+        rhs = sio.loadmat(rhs_fname)['rhs']
+    
+        M_n = create_M_newton(model_data, y0_data, constr_data)
+        (inds, nrows) = find_reordering(model_data['model'])   
+        permute_sparse_matrix(M_n, inds[0][0], inds[0][1])
+        rhs = rhs[inds[0][0]] 
+        ncont = len(model[0][0][1][0]) - 1
+
+        splits = split_bigM(M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
+
+    local_data = MPI.COMM_WORLD.scatter(splits, root=0)
+    (res) = local_schurs(local_data)
+    combined = MPI.COMM_WORLD.gather(res, root = 0)
+    return(combined)
+
+
+def run_run_sample4():
+    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
+    res = run_sample4(mname, rhsname, yname, cname)
+    print(res)
+
+def local_schurs(inputs):
+    (B, F, E, C, f, g, u) = inputs
+    A1_local = C - E * (1/B.diagonal()) * F
+    g1_local = g - E * (1/b.diagonal()) * f
+    
+    return((A1_local, g1_local, u))
+#        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
+
+    
 def shift_C0(C, ncont, inds):
     total_th = reduce(lambda x, y : len(x) + len(y), inds['deltaTheta'])
     
@@ -949,6 +1002,8 @@ def shift_C0(C, ncont, inds):
  #   return(C2)
         
 
+if __name__ == '__main__':
+    run_run_sample4()
 #
 #if __name__ == __main__:    
 #    nproc = MPI.COMM_WORLD.Get_size()
