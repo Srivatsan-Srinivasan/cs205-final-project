@@ -844,6 +844,7 @@ def structure(model_path):
 
 
 def split_bigM(A, rhs, nrows, ncont, nprocess, model, inds):
+    #print("Ncount is %d" % ncont)
     B0 = A[:nrows, :nrows]
     F0 = A[:nrows, nrows:]
     E0 = A[nrows:, :nrows]
@@ -855,7 +856,7 @@ def split_bigM(A, rhs, nrows, ncont, nprocess, model, inds):
 #    C0 = C0[:, new_col_inds]
 #    F0 = F0[:, new_col_inds]
     (Bs, Fs, Es, Cs, gs, fs, us) = ([], [], [], [], [], [], [])
-
+    
     (start_b, start_f_col, start_f_row, start_e_col, start_e_row,
      start_c_col, start_c_row) = (0, 0, 0, 0, 0, 0, 0)
     for k in range(0, ncont + 1):
@@ -913,7 +914,7 @@ def split_bigM(A, rhs, nrows, ncont, nprocess, model, inds):
     Fs.append(F0[start_f_row:start_f_row + l_cut, :])
     fs.append(f0[start_f_row:start_f_row + l_cut])
     Es.append(E0[:, start_e_col:])
-
+    print("BS length is %d" % len(Bs))
     to_send = [(b, f, e, c, f, g, u)
                for (b, f, e, c, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
 
@@ -961,13 +962,14 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
         (inds, nrows) = find_reordering(model_data['model'])
-        permute_sparse_matrix(M_n, inds[0][0], inds[0][1])
-        rhs = rhs[inds[0][0]]
+        M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
+        rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
 
-        splits = split_bigM(
+        (splits, _) = split_bigM(
             M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
 #	print("I am proc %d and i'm sending data" % iproc)
+    #print(len(splits))
     local_data = MPI.COMM_WORLD.scatter(splits, root=0)
     #print("I am proc %d and I've received some data" % iproc)
     (res) = local_schurs(local_data)
@@ -984,8 +986,8 @@ def run_run_sample4():
 
 def local_schurs(inputs):
     (B, F, E, C, f, g, u) = inputs
-    A1_local = C - E * (1/B.diagonal()) * F
-    g1_local = g - E * (1/b.diagonal()) * f
+    A1_local = C - E * sparse.diags(1/B.diagonal()) * F
+    g1_local = g - E * sparse.diags(1/B.diagonal()) * f
 
     return((A1_local, g1_local, u))
 #        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
