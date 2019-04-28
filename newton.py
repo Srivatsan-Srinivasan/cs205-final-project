@@ -917,8 +917,8 @@ def split_bigM(A, rhs, nrows, ncont, nprocess, model, inds):
     fs.append(f0[start_f_row:start_f_row + l_cut])
     Es.append(E0[:, start_e_col:])
     print("BS length is %d" % len(Bs))
-    to_send = [(b, f, e, c, f, g, u)
-               for (b, f, e, c, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
+    to_send = [(B, F, E, C, f, g, u)
+               for (B, F, E, C, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
 
     As = []
     for i in range(0, len(Fs)):
@@ -977,15 +977,14 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     (res) = local_schurs(local_data)
     combined = MPI.COMM_WORLD.gather(res, root=0)
     split_solve = None
-    if(iproc = 0):
-        newA = reduce(lambda x, y : x + y, combined[0])
-        newG = reduce(lambda x, y : x + y, combined[1])
-        split_solve = split_to_distributed(model, Ar, rhsr, num_cont):
+    if(iproc == 0):
+        newA = reduce(lambda x, y : x[0] + y[0], combined)
+        newG = reduce(lambda x, y : x[1] + y[1], combined)
+        split_solve = split_to_distributed(model, Ar, rhsr, num_cont)
     
     local_sol = MPI.COMM_WORLD.scatter(split_solve, root = 0)
     combined2 = MPI.COMM_WORLD.gather(local_sol, root = 0)
     return(combined2)
-
 
 def run_run_sample4():
     (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
