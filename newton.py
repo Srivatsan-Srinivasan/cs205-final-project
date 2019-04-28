@@ -17,7 +17,6 @@ import time
 import os
 from functools import reduce
 from mpi4py import MPI
-#from mpi4py import MPI
 # from enum import Enum     # for enum34, or the stdlib version
 
 #PMethod= Enum('PMethod', 'given')
@@ -576,7 +575,7 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
     
     Ar2 = Ar
-#    (cols, rows, inds) = find_regrouping(model)
+    (cols, rows, inds) = find_regrouping(model)
 #    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
 #    rhsr = rhsr[np.concatenate(cols)]
 
@@ -952,6 +951,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     iproc = MPI.COMM_WORLD.Get_rank()
     inode = MPI.Get_processor_name()
    # assert(nproc > 1)
+    #iproc = 0
     splits = None
     if(iproc == 0):
         #print("Handling splits")
@@ -960,7 +960,6 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
         constr_data = sio.loadmat(constr_fname)
         rhs = sio.loadmat(rhs_fname)['rhs']
         model = model_data['model']
-        #odel = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
         (inds, nrows) = find_reordering(model_data['model'])
@@ -970,17 +969,22 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
 
         (splits, _) = split_bigM(
             M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
-#	print("I am proc %d and i'm sending data" % iproc)
+	#print("I am proc %d and i'm sending data" % iproc)
     #print(len(splits))
     local_data = MPI.COMM_WORLD.scatter(splits, root=0)
-    #print("I am proc %d and I've received some data" % iproc)
+    print("I am proc %d and I've received some data" % iproc)
     (res) = local_schurs(local_data)
     combined = MPI.COMM_WORLD.gather(res, root=0)
-    split_solve = None
+ #   combined = list(map(local_schurs, splits))
+  #  split_solve = None
+    
     if(iproc == 0):
-        newA = reduce(lambda x, y : x[0] + y[0], combined)
-        newG = reduce(lambda x, y : x[1] + y[1], combined)
-        split_solve = split_to_distributed(model, Ar, rhsr, num_cont)
+        newA= combined[0][0]
+        newG = combined[0][1]
+        for i in range(1, len(combined[0])):
+            newA += combined[i][0]
+            newG += combined[i][1]
+        split_solve = split_to_distributed(model, newA, newG, ncont)
     
     local_sol = MPI.COMM_WORLD.scatter(split_solve, root = 0)
     combined2 = MPI.COMM_WORLD.gather(local_sol, root = 0)
