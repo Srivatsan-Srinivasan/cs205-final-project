@@ -598,8 +598,11 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = rhsr[start_r:]
-    to_split_arr.insert(0, Cp)
-    rhs_split_arr.insert(0, rhs_left)
+    to_split_arr.append(Cp)
+    rhs_split_arr.append(rhs_left)
+    
+    #to_split_arr.insert(0, Cp)
+    #rhs_split_arr.insert(0, rhs_left)
     Hps_outer = []
     Hps_inner = []
     start_c = 0
@@ -611,7 +614,8 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
             Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
         Hps_outer.append(
             Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
-    Hps_outer.insert(0, Hps_inner)
+    Hps_outer.append(Hps_inner)
+    #Hps_outer.insert(0, Hps_inner)
 
     return(to_split_arr, rhs_split_arr, Hps_outer)
 
@@ -743,21 +747,6 @@ def find_reordering(model):
     return([new_rows_inds, new_column_inds, inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
 
 
-'''
-def run_distributed(toSend, toReceive):
-        toReceive = None
-        information = MPI.COMM_WORLD.scatter(toSend, toReceive root = 0)
-         
-
-        r2 = split_to_distributed(model, Ar, g0_prime, 1)
-        y0 = run_distributed(r2)
-'''
-#model_data = sio.loadmat("5_bus_model")
-#y0_data = sio.loadmat("5_bus_model_y0")
-#constr_data = sio.loadmat("5_bus_model_const")
-#rhs = sio.loadmat('rhs')['rhs']
-
-#M_n = create_M_newton(model_data, y0_data, constr_data)
 
 #AB = run_sample()
 #ABCD = run_sample2()
@@ -772,13 +761,99 @@ def fwd_back(b, L, U):
     return(x)
 
 
-'''Handle getting Schur complement from L, U
-TODO Actually do it - for now just return'''
 
 
 def get_S(L, U, num=33):
+    '''Handle getting Schur complement from L, U
+    TODO Actually do it - for now just return'''
+
     return(L[num:, num:], U[num:, num:])
 
+
+
+def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restarts = 1, tol = 1e-6):
+    '''Distributed gmres solver'''
+    nproc = MPI.COMM_WORLD.Get_size()
+    iproc = MPI.COMM_WORLD.Get_rank()
+
+    combined = np.concatenate((fi, gi))
+    ILU = sparse.linalg.spilu(Ai)
+    (L, U) = (ILU.L, ILU.U)
+    r = fwd_back(combined, L, U)
+    (L_inner, U_inner) = (L, U)
+    if(iproc != nproc):    
+        (L_inner, U_inner) = get_S(L, U)
+    
+    if(yguess == None):
+        yguess = np.zeros_like(L.shape[0])
+    for count in range(0, num_restarts):
+        '''Do this communcation part for number of iteration'''
+        # Get the interface components for all processors as per algo2/3
+        interface_y = communicate_interface(iproc, nproc, yguess)
+        #Do the dot product
+        adjust_left = interface_dotProd(interface_y, Hips)
+        Pr = r[len(fi):]
+        #Now do the actual gmres solver to get a new guess
+        yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+        residual = np.linalg.norm(yguess_new - yguess)
+        yguess = yguess_new
+        #Alwayts stop if the residual keeps on going down
+        if(residual < tol):
+            break
+    
+    #Now commmunicate what's left
+    interface_y = communicate_interface(iproc, nproc, yguess)
+    t = interface_dotProd(interface_y, Hips)
+    
+    #Subtract it out and do a final solve
+    gi = gi - t
+    combined = np.concatenate((fi, gi))
+    combined_soln = fwd_back(combined, L, U)
+    return(combined_soln)
+        
+
+def communicate_interface(iproc, nproc, toSend):
+    if(iproc == nproc - 1):
+        toGather = None
+    cont_to_power_injection = MPI.COMM_WORLD.gather(toGather, root = nproc)
+    if(iproc != nproc - 1):
+        toBcast = None
+    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = nproc)
+    interface_y = None
+    if(cont_to_power_injection != None):
+        interface_y = cont_to_power_injection
+    else:
+        interface_y = power_injection_to_cont
+    return(interface_y)
+    
+def interface_dotProd(interface_y, Hips):
+    adjust_left = 0
+    for index in range(0, len(Hips)):
+        adjust_left += Hips[index] * interface_y[index]
+    return(adjust_left)
+            
+def gmres_solver_inner(LS, US, Pr, yguess, yinterface, niter, tol):
+    V = np.zeros((len(Pr), niter + 1))
+    beta = np.linalg.norm(Pr)
+    v1 = Pr / beta
+    Hs = np.zeros((niter + 1, niter + 1))
+    V[:, 0] = v1.flatten()
+    for j in range(0, niter):
+#        yinterface = get_interface(LS.shape[0], useMPI)
+        t = fwd_back(yinterface, LS, US)
+        w = V[:, j] + t.T
+        for l in range(0, j):
+            Hs[l, j] = w.dot(V[:, l])
+            w = w - Hs[l, j] * (V[:, l])
+        Hs[j+1, j] = np.linalg.norm(w)
+        V[:, j+1] = w / Hs[j+1, j]
+    Hs = Hs[:niter, :niter]
+    V = V[:, :niter]
+    z = np.linalg.lstsq(Hs, np.ones((niter)) * beta)[0]
+    yguess = yguess + V.dot(z)
+    return(yguess)
+    
+    
 
 def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined = np.concatenate((fi, gi))
@@ -984,6 +1059,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
         for i in range(1, len(combined[0])):
             newA += combined[i][0]
             newG += combined[i][1]
+        #Note that this ordering has the last processor as the "contigency one"
         split_solve = split_to_distributed(model, newA, newG, ncont)
     
     local_sol = MPI.COMM_WORLD.scatter(split_solve, root = 0)
