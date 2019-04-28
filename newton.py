@@ -977,7 +977,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     combined = MPI.COMM_WORLD.gather(res, root=0)
  #   combined = list(map(local_schurs, splits))
   #  split_solve = None
-    
+    split_solve = None    
     if(iproc == 0):
         newA= combined[0][0]
         newG = combined[0][1]
@@ -994,6 +994,7 @@ def run_run_sample4():
     (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
     print("Running a simple test")
     res = run_sample4(mname, rhsname, yname, cname)
+    print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
     print(res)
 
 
