@@ -692,7 +692,7 @@ def find_reordering(model):
         new_column_inds[shift:dim_th + shift] = inds['deltaTheta'][k]
         shift += dim_th
         
-        '''
+        
         dim_neq = dims[dim_mapping['neq']][0][0]          
         new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
         shift += dim_neq
@@ -704,6 +704,7 @@ def find_reordering(model):
         dim_neq = dims[dim_mapping['neq']][0][0]          
         new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
         shift += dim_neq
+        '''
     
     new_column_inds[shift:p+shift] = inds['deltaP']
     shift += p
@@ -725,21 +726,21 @@ def find_reordering(model):
         new_rows_inds[shift2:dim_th + shift2] = inds['rDual'][k]
         shift2 += dim_th
         
-        '''
+        
         dim_neq= dims[dim_mapping['neq']][0][0]
         new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
         shift2 += dim_neq
-        '''
+        
     
     new_rows_inds[shift2:p + shift2] = inds['rdualP']
     shift2 += p
-    
+    '''
     for k in range(0, ncont + 1):
         (dims, dim_mapping) = get_specific_dim(model, k)
         dim_neq= dims[dim_mapping['neq']][0][0]
         new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
         shift2 += dim_neq
-    
+    '''
 
     
     return([new_rows_inds, new_column_inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
@@ -762,7 +763,7 @@ def run_distributed(toSend, toReceive):
 
 #AB = run_sample()
 #ABCD = run_sample2()
-ABCD_2 = run_sample2()
+ABCD_two = run_sample2()
 #akc = run_many()
 
 def fwd_back(b, L, U):
@@ -866,9 +867,9 @@ def split_bigM(A, nrows, ncont, nprocess, model):
     E0 = A[nrows:, :nrows]
     C0 = A[nrows:, nrows:]
     
-   # new_col_inds = shift_C0(C0, ncont, inds)
-    #C0 = C0[:, new_col_inds]
-    #F0 = F0[:, new_col_inds]
+#    new_col_inds = shift_C0(C0, ncont, inds)
+#    C0 = C0[:, new_col_inds]
+#    F0 = F0[:, new_col_inds]
     (Bs, Fs, Es, Cs) = ([], [], [], [])
     
     (start_b, start_f_col, start_f_row, start_e_col, start_e_row, start_c_col, start_c_row) = (0, 0, 0, 0, 0, 0, 0)
@@ -912,7 +913,17 @@ def split_bigM(A, nrows, ncont, nprocess, model):
         temp_res = c - e * sparse.diags(1/b.diagonal()) * f
         As.append(temp_res)
     
-    
+
+def revert_ordering(ordering):
+    new_col_inds = ordering
+ #   y0_reorder = np.zeros_like(orig)
+    inds = []
+    for i in range(0, len(ordering)):
+        itemindex = np.where(new_col_inds==i)[0][0]
+        inds.append(itemindex)
+#        y0_reorder[i] = orig[itemindex]
+ #   y0 = y0_reorder
+    return(inds)
         
    
 def shift_C0(C, ncont, inds):
