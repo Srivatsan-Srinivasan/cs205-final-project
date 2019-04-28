@@ -13,6 +13,7 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 
 import time
+import sys
 #import pyamg
 import os
 from functools import reduce
@@ -971,6 +972,12 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
             M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
 	#print("I am proc %d and i'm sending data" % iproc)
     #print(len(splits))
+
+        if len(splits) != nproc:
+            print('number of processors must equal number of constraints + 2,  in this case use {} processors.'.format(len(splits)))
+            sys.stdout.flush()
+            MPI.COMM_WORLD.Abort()
+
     local_data = MPI.COMM_WORLD.scatter(splits, root=0)
     print("I am proc %d and I've received some data" % iproc)
     (res) = local_schurs(local_data)
