@@ -774,12 +774,14 @@ def get_S(L, U, num=33):
 
 
 
-def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restarts = 1, tol = 1e-6):
+def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 1, tol = 1e-6):
     '''Distributed gmres solver'''
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
-
-    combined = np.concatenate((fi, gi))
+    if(len(fi)):
+        combined = np.concatenate((fi, gi))
+    else:
+        combined = gi
     #TODO: Need to update to match matlab better
     thresh = None
     if((Ai.diagonal()).prod() == 0):
@@ -787,27 +789,12 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restar
         
     (L, U, L_inner, U_inner) = (None, None, None, None)
     #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
-    if(nproc - 1 == iproc):
+    if(useSchurs):
         ILU = sparse.linalg.spilu(Ai)
         (L, U) = (ILU.L, ILU.U)
         (L_inner, U_inner) = get_S(L, U, len(fi))
-   # (_, L, U) = scipy.linalg.lu(Ai.todense())
-   # L = sparse.csc_matrix(L)
-   # U = sparse.csc_matrix(U)
-     
-    #ILU = sparse.linalg.spilu(Ai + 1e-12 * sparse.eye(Ai.shape[0], Ai.shape[1]), permc_spec = "NATURAL", diag_pivot_thresh = thresh)
-
-   # (P, L, U) = spla.lu(Ai.todense())
-   
-#    (L, U) = (ILU.L, ILU.U)
-#    r = fwd_back(combined, L, U)
-  #  r = scipy.linalg.lstsq(Ai.todense(), combined)[0] 
-   # (L_inner, U_inner) = (L, U)
-    #if(iproc != nproc - 1):    
-  #  (L_inner, U_inner) = get_S(L, U, len(fi))
-    
+        r = fwd_back(combined, L, U)
     (Hi, dx, Bi, Hi) = (None, None, None, None)
-    #if(nproc - 1 != iproc):    
      
   #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
     if(yguess == None):
@@ -818,7 +805,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restar
         interface_y = communicate_interface(iproc, nproc, yguess, False)
         #Do the dot product
         adjust_left = interface_dotProd(interface_y, Hips)
-        if(nproc - 1 != iproc):
+        if(useSchurs):
             Pr = r[len(fi):]
             #Now do the actual gmres solver to get a new guess
             yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
@@ -837,22 +824,26 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restar
             break
     
     #Now commmunicate what's left
-    interface_y = communicate_interface(iproc, nproc, yguess)
+    interface_y = communicate_interface(iproc, nproc, yguess, False)
     t = interface_dotProd(interface_y, Hips)
     
     #Subtract it out and do a final solve
     gi = gi - t
     
-    if(nproc - 1 != iproc):
+    if(not useSchurs):
         Hi = Ai[len(fi):, :len(fi)]
         dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
         Bi = Ai[:len(fi), :len(fi)]
         HiT = Ai[:len(fi), len(fi):]
         yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
-        combined_soln = np.concatenate(dx, yguess_new)
+        combined_soln = np.concatenate((dx, yguess_new))
 
     else:        
-        combined = np.concatenate((fi, gi))
+        if(len(fi)):
+            combined = np.concatenate((fi, gi))
+        else:
+            combined = gi
+    #    combined = np.concatenate((fi, gi.flatten()))
         combined_soln = fwd_back(combined, L, U)
     return(combined_soln)
         
@@ -863,10 +854,10 @@ def communicate_interface(iproc, nproc, toSend, useMPI = True):
     
     if(iproc == nproc - 1):
         toGather = None
-    cont_to_power_injection = MPI.COMM_WORLD.gather(toGather, root = nproc)
+    cont_to_power_injection = MPI.COMM_WORLD.gather(toGather, root = nproc - 1)
     if(iproc != nproc - 1):
         toBcast = None
-    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = nproc)
+    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = nproc - 1)
     interface_y = None
     if(cont_to_power_injection != None):
         interface_y = cont_to_power_injection
@@ -1122,17 +1113,19 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     
     local_inputs = MPI.COMM_WORLD.scatter(split_solve, root = nproc - 1)
     
-    all_solns = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
-         niter=10, num_restarts=1, tol = 1e-6)
+    inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
+         nproc -1 == iproc, niter=10, num_restarts=1, tol = 1e-6)
 
-
-    combined2 = MPI.COMM_WORLD.gather(local_sol, root = nproc - 1)
+    print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))
+    
+    combined2 = MPI.COMM_WORLD.gather(inner_soln, root = nproc - 1)
     return(combined2)
 
 
-local_inputs = split_solve[0]
-test_sol = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
-         niter=10, num_restarts=1, tol = 1e-6)
+#a2 = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], False)
+#local_inputs = split_solve[0]
+#test_sol = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
+#         niter=10, num_restarts=1, tol = 1e-6)
 
 
 def run_run_sample4():
@@ -1177,7 +1170,7 @@ def shift_C0(C, ncont, inds):
 
 
 if __name__ == '__main__':
- #   ABCD = run_sample2()
+    #ABCD = run_sample2()
 
     run_run_sample4()
 #
