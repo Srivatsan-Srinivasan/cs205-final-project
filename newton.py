@@ -799,7 +799,30 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
   #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
     if(yguess == None):
         yguess = np.zeros_like(gi)
-ygues    
+    for count in range(0, num_restarts):
+        '''Do this communcation part for number of iteration'''
+        # Get the interface components for all processors as per algo2/3
+        interface_y = communicate_interface(iproc, nproc, yguess)
+        #Do the dot product
+        adjust_left = interface_dotProd(interface_y, Hips)
+        if(useSchurs):
+            Pr = r[len(fi):]
+            #Now do the actual gmres solver to get a new guess
+            yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+            
+        else:
+            Hi = Ai[len(fi):, :len(fi)]
+            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+            Bi = Ai[:len(fi), :len(fi)]
+            HiT = Ai[:len(fi), len(fi):]
+            yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
+        
+        residual = np.linalg.norm(yguess_new - yguess)
+        yguess = yguess_new    
+        #Alwayts stop if the residual keeps on going down
+        if(residual < tol):
+            break
+    
     #Now commmunicate what's left
     interface_y = communicate_interface(iproc, nproc, yguess)
     t = interface_dotProd(interface_y, Hips)
@@ -916,8 +939,6 @@ def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined = np.concatenate((fi, gi))
     combined_soln = fwd_back(combined, L1, U1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
-
-grimes_solver(Ai, fi, gi, 10)
 
 def structure(model_path):
     nproc = MPI.COMM_WORLD.Get_size()
