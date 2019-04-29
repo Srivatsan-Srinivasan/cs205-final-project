@@ -602,11 +602,11 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = (np.zeros((0, 0)), rhsr[start_r:])
-    to_split_arr.append(Cp)
-    rhs_split_arr.append(rhs_left)
+    #to_split_arr.append(Cp)
+    #rhs_split_arr.append(rhs_left)
     
-    #to_split_arr.insert(0, Cp)
-    #rhs_split_arr.insert(0, rhs_left)
+    to_split_arr.insert(0, Cp)
+    rhs_split_arr.insert(0, rhs_left)
     Hps_outer = []
     Hps_inner = []
     start_c = 0
@@ -618,9 +618,9 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
             Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
         Hps_outer.append(
             [Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu]])
-    Hps_outer.append(Hps_inner)
-    #Hps_outer.insert(0, Hps_inner)
-
+    #Hps_outer.append(Hps_inner)
+    Hps_outer.insert(0, Hps_inner)
+    print("Len is %d" % len(Hps_outer[0]))
     return(to_split_arr, rhs_split_arr, Hps_outer)
 
    # to_split_arr.append()
@@ -802,7 +802,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
         # Get the interface components for all processors as per algo2/3
-        interface_y = communicate_interface(iproc, nproc, yguess, False)
+        interface_y = communicate_interface(iproc, nproc, yguess)
         #Do the dot product
         adjust_left = interface_dotProd(interface_y, Hips)
         if(useSchurs):
@@ -824,7 +824,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             break
     
     #Now commmunicate what's left
-    interface_y = communicate_interface(iproc, nproc, yguess, False)
+    interface_y = communicate_interface(iproc, nproc, yguess)
     t = interface_dotProd(interface_y, Hips)
     
     #Subtract it out and do a final solve
@@ -851,23 +851,30 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
 def communicate_interface(iproc, nproc, toSend, useMPI = True):
     if(not useMPI):
         return([np.zeros_like(toSend)])
-    
-    if(iproc == nproc - 1):
-        toGather = None
-    cont_to_power_injection = MPI.COMM_WORLD.gather(toGather, root = nproc - 1)
-    if(iproc != nproc - 1):
-        toBcast = None
-    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = nproc - 1)
+    from_other_to_root = toSend
+    if(iproc == 0):
+        from_other_to_root = None
+    cont_to_power_injection = MPI.COMM_WORLD.gather(from_other_to_root, root = 0)
+    print("For %d I have cont for cont power %s" % (iproc, str(cont_to_power_injection)))
+    toBcast = None
+    if(iproc == 0):
+        toBcast = [toSend]
+    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = 0)
+    print("For %d I have power %s" %(iproc, str(power_injection_to_cont)))
     interface_y = None
-    if(cont_to_power_injection != None):
-        interface_y = cont_to_power_injection
+    if(iproc == 0):
+        interface_y = [x for x in cont_to_power_injection if x is not None]
     else:
         interface_y = power_injection_to_cont
+    print("For %d i have interface beign %s" % (iproc, str(interface_y)))
     return(interface_y)
     
 def interface_dotProd(interface_y, Hips):
     adjust_left = 0
     for index in range(0, len(Hips)):
+        print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
+        temp = Hips[index] * interface_y[index]
+	#print('hi')	
         adjust_left += Hips[index] * interface_y[index]
     return(adjust_left)
             
@@ -1101,6 +1108,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     combined = MPI.COMM_WORLD.gather(res, root=0)
  #   combined = list(map(local_schurs, splits))
   #  split_solve = None
+    #MPI.COMM_WORLD.Barrier().
     split_solve = None    
     if(iproc == 0):
         newA= combined[0][0]
@@ -1110,11 +1118,13 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
             newG += combined[i][1]
         #Note that this ordering has the last processor as the "contigency one"
         split_solve = distrubted_calc(model, newA, newG, ncont)
-    
-    local_inputs = MPI.COMM_WORLD.scatter(split_solve, root = nproc - 1)
-    
+    print("Split solve from %d has %s" % (iproc, str(split_solve)))  
+    local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
+    print("Local input %d has %s" % (iproc, str(local_inputs)))
+    print(local_inputs)
+    #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
     inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
-         nproc -1 == iproc, niter=10, num_restarts=1, tol = 1e-6)
+         (iproc == 0), niter=10, num_restarts=1, tol = 1e-6)
 
     print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))
     
