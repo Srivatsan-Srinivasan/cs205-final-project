@@ -18,8 +18,9 @@ import sys
 import os
 from functools import reduce
 from mpi4py import MPI
+import scipy.linalg as spla
 # from enum import Enum     # for enum34, or the stdlib version
-
+import scipy
 #PMethod= Enum('PMethod', 'given')
 #nrowMethod = Enum("nrowMethod", "given")
 
@@ -594,11 +595,13 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
         rhs_split_arr.append((fi, gi))
         start_r += i_row
         start_c += i_col
+    
+    
     check1 = Ar2[:, start_c:]
     check2 = Ar2[start_r:, :]
     assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
-    rhs_left = rhsr[start_r:]
+    rhs_left = (np.zeros((0, 0)), rhsr[start_r:])
     to_split_arr.append(Cp)
     rhs_split_arr.append(rhs_left)
     
@@ -614,7 +617,7 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
         Hps_inner.append(
             Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
         Hps_outer.append(
-            Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
+            [Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu]])
     Hps_outer.append(Hps_inner)
     #Hps_outer.insert(0, Hps_inner)
 
@@ -767,7 +770,6 @@ def fwd_back(b, L, U):
 def get_S(L, U, num=33):
     '''Handle getting Schur complement from L, U
     TODO Actually do it - for now just return'''
-
     return(L[num:, num:], U[num:, num:])
 
 
@@ -778,26 +780,58 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restar
     iproc = MPI.COMM_WORLD.Get_rank()
 
     combined = np.concatenate((fi, gi))
-    ILU = sparse.linalg.spilu(Ai)
-    (L, U) = (ILU.L, ILU.U)
-    r = fwd_back(combined, L, U)
-    (L_inner, U_inner) = (L, U)
-    if(iproc != nproc):    
-        (L_inner, U_inner) = get_S(L, U)
+    #TODO: Need to update to match matlab better
+    thresh = None
+    if((Ai.diagonal()).prod() == 0):
+        thresh = 0
+        
+    (L, U, L_inner, U_inner) = (None, None, None, None)
+    #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
+    if(nproc - 1 == iproc):
+        ILU = sparse.linalg.spilu(Ai)
+        (L, U) = (ILU.L, ILU.U)
+        (L_inner, U_inner) = get_S(L, U, len(fi))
+   # (_, L, U) = scipy.linalg.lu(Ai.todense())
+   # L = sparse.csc_matrix(L)
+   # U = sparse.csc_matrix(U)
+     
+    #ILU = sparse.linalg.spilu(Ai + 1e-12 * sparse.eye(Ai.shape[0], Ai.shape[1]), permc_spec = "NATURAL", diag_pivot_thresh = thresh)
+
+   # (P, L, U) = spla.lu(Ai.todense())
+   
+#    (L, U) = (ILU.L, ILU.U)
+#    r = fwd_back(combined, L, U)
+  #  r = scipy.linalg.lstsq(Ai.todense(), combined)[0] 
+   # (L_inner, U_inner) = (L, U)
+    #if(iproc != nproc - 1):    
+  #  (L_inner, U_inner) = get_S(L, U, len(fi))
     
+    (Hi, dx, Bi, Hi) = (None, None, None, None)
+    #if(nproc - 1 != iproc):    
+     
+  #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
     if(yguess == None):
-        yguess = np.zeros_like(L.shape[0])
+        yguess = np.zeros_like(gi)
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
         # Get the interface components for all processors as per algo2/3
-        interface_y = communicate_interface(iproc, nproc, yguess)
+        interface_y = communicate_interface(iproc, nproc, yguess, False)
         #Do the dot product
         adjust_left = interface_dotProd(interface_y, Hips)
-        Pr = r[len(fi):]
-        #Now do the actual gmres solver to get a new guess
-        yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+        if(nproc - 1 != iproc):
+            Pr = r[len(fi):]
+            #Now do the actual gmres solver to get a new guess
+            yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+            
+        else:
+            Hi = Ai[len(fi):, :len(fi)]
+            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+            Bi = Ai[:len(fi), :len(fi)]
+            HiT = Ai[:len(fi), len(fi):]
+            yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
+        
         residual = np.linalg.norm(yguess_new - yguess)
-        yguess = yguess_new
+        yguess = yguess_new    
         #Alwayts stop if the residual keeps on going down
         if(residual < tol):
             break
@@ -808,12 +842,25 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, yguess = None, niter = 10, num_restar
     
     #Subtract it out and do a final solve
     gi = gi - t
-    combined = np.concatenate((fi, gi))
-    combined_soln = fwd_back(combined, L, U)
+    
+    if(nproc - 1 != iproc):
+        Hi = Ai[len(fi):, :len(fi)]
+        dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+        Bi = Ai[:len(fi), :len(fi)]
+        HiT = Ai[:len(fi), len(fi):]
+        yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
+        combined_soln = np.concatenate(dx, yguess_new)
+
+    else:        
+        combined = np.concatenate((fi, gi))
+        combined_soln = fwd_back(combined, L, U)
     return(combined_soln)
         
 
-def communicate_interface(iproc, nproc, toSend):
+def communicate_interface(iproc, nproc, toSend, useMPI = True):
+    if(not useMPI):
+        return([np.zeros_like(toSend)])
+    
     if(iproc == nproc - 1):
         toGather = None
     cont_to_power_injection = MPI.COMM_WORLD.gather(toGather, root = nproc)
@@ -851,10 +898,12 @@ def gmres_solver_inner(LS, US, Pr, yguess, yinterface, niter, tol):
     Hs = Hs[:niter, :niter]
     V = V[:, :niter]
     z = np.linalg.lstsq(Hs, np.ones((niter)) * beta)[0]
-    yguess = yguess + V.dot(z)
+    yguess = (yguess.flatten() + V.dot(z).flatten()).T
     return(yguess)
     
-    
+
+def get_interface(a, b):
+    return 0
 
 def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined = np.concatenate((fi, gi))
@@ -866,12 +915,14 @@ def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     V = np.zeros((len(Pr), niter + 1))
     beta = np.linalg.norm(Pr)
     v1 = Pr / beta
-    (LS, US) = get_S(L1, U1)
+    (LS, US) = get_S(L1, U1, len(fi))
     Hs = np.zeros((niter + 1, niter + 1))
     V[:, 0] = v1.flatten()
     for j in range(0, niter):
         yinterface = get_interface(LS.shape[0], useMPI)
-        t = fwd_back(yinterface, LS, US)
+       # t = fwd_back(yinterface, LS, US)
+       # t = 0
+        t = np.zeros_like(V[:, j].shape)
         w = V[:, j] + t.T
         for l in range(0, j):
             Hs[l, j] = w.dot(V[:, l])
@@ -1047,12 +1098,12 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
             M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
 	#print("I am proc %d and i'm sending data" % iproc)
     #print(len(splits))
-
+    '''
         if len(splits) != nproc:
             print('number of processors must equal number of constraints + 2,  in this case use {} processors.'.format(len(splits)))
             sys.stdout.flush()
             MPI.COMM_WORLD.Abort()
-
+    '''
     local_data = MPI.COMM_WORLD.scatter(splits, root=0)
     print("I am proc %d and I've received some data" % iproc)
     (res) = local_schurs(local_data)
@@ -1067,11 +1118,22 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
             newA += combined[i][0]
             newG += combined[i][1]
         #Note that this ordering has the last processor as the "contigency one"
-        split_solve = split_to_distributed(model, newA, newG, ncont)
+        split_solve = distrubted_calc(model, newA, newG, ncont)
     
-    local_sol = MPI.COMM_WORLD.scatter(split_solve, root = 0)
-    combined2 = MPI.COMM_WORLD.gather(local_sol, root = 0)
+    local_inputs = MPI.COMM_WORLD.scatter(split_solve, root = nproc - 1)
+    
+    all_solns = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
+         niter=10, num_restarts=1, tol = 1e-6)
+
+
+    combined2 = MPI.COMM_WORLD.gather(local_sol, root = nproc - 1)
     return(combined2)
+
+
+local_inputs = split_solve[0]
+test_sol = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
+         niter=10, num_restarts=1, tol = 1e-6)
+
 
 def run_run_sample4():
     (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
@@ -1115,6 +1177,8 @@ def shift_C0(C, ncont, inds):
 
 
 if __name__ == '__main__':
+ #   ABCD = run_sample2()
+
     run_run_sample4()
 #
 # if __name__ == __main__:
