@@ -601,7 +601,7 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     check2 = Ar2[start_r:, :]
     assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
-    rhs_left = (np.zeros((0, 0)), rhsr[start_r:])
+    rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
     #to_split_arr.append(Cp)
     #rhs_split_arr.append(rhs_left)
     
@@ -799,30 +799,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
   #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
     if(yguess == None):
         yguess = np.zeros_like(gi)
-    for count in range(0, num_restarts):
-        '''Do this communcation part for number of iteration'''
-        # Get the interface components for all processors as per algo2/3
-        interface_y = communicate_interface(iproc, nproc, yguess)
-        #Do the dot product
-        adjust_left = interface_dotProd(interface_y, Hips)
-        if(useSchurs):
-            Pr = r[len(fi):]
-            #Now do the actual gmres solver to get a new guess
-            yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
-            
-        else:
-            Hi = Ai[len(fi):, :len(fi)]
-            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
-            Bi = Ai[:len(fi), :len(fi)]
-            HiT = Ai[:len(fi), len(fi):]
-            yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
-        
-        residual = np.linalg.norm(yguess_new - yguess)
-        yguess = yguess_new    
-        #Alwayts stop if the residual keeps on going down
-        if(residual < tol):
-            break
-    
+ygues    
     #Now commmunicate what's left
     interface_y = communicate_interface(iproc, nproc, yguess)
     t = interface_dotProd(interface_y, Hips)
@@ -875,10 +852,11 @@ def interface_dotProd(interface_y, Hips):
         print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
         temp = Hips[index] * interface_y[index]
 	#print('hi')	
-        adjust_left += Hips[index] * interface_y[index]
+        adjust_left += temp
     return(adjust_left)
             
 def gmres_solver_inner(LS, US, Pr, yguess, yinterface, niter, tol):
+    A = LS.dot(US)
     V = np.zeros((len(Pr), niter + 1))
     beta = np.linalg.norm(Pr)
     v1 = Pr / beta
@@ -887,7 +865,7 @@ def gmres_solver_inner(LS, US, Pr, yguess, yinterface, niter, tol):
     for j in range(0, niter):
 #        yinterface = get_interface(LS.shape[0], useMPI)
         t = fwd_back(yinterface, LS, US)
-        w = V[:, j] + t.T
+        w = A.dot(V[:, j]) + t.T
         for l in range(0, j):
             Hs[l, j] = w.dot(V[:, l])
             w = w - Hs[l, j] * (V[:, l])
@@ -917,11 +895,12 @@ def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     Hs = np.zeros((niter + 1, niter + 1))
     V[:, 0] = v1.flatten()
     for j in range(0, niter):
-        yinterface = get_interface(LS.shape[0], useMPI)
+      #  yinterface = get_interface(LS.shape[0], useMPI)
        # t = fwd_back(yinterface, LS, US)
        # t = 0
-        t = np.zeros_like(V[:, j].shape)
-        w = V[:, j] + t.T
+       # t = np.zeros_like(V[:, j].shape)
+        #w = V[:, j] + t.T
+        w = Ai.dot(V[:, j])
         for l in range(0, j):
             Hs[l, j] = w.dot(V[:, l])
             w = w - Hs[l, j] * (V[:, l])
@@ -938,6 +917,7 @@ def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined_soln = fwd_back(combined, L1, U1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
 
+grimes_solver(Ai, fi, gi, 10)
 
 def structure(model_path):
     nproc = MPI.COMM_WORLD.Get_size()
