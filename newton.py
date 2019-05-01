@@ -774,7 +774,7 @@ def get_S(L, U, num=33):
 
 
 
-def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 1, tol = 1e-6):
+def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
     '''Distributed gmres solver'''
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
@@ -805,6 +805,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
         interface_y = communicate_interface(iproc, nproc, yguess)
         #Do the dot product
         adjust_left = interface_dotProd(interface_y, Hips)
+        print("Adjusted left for %d at num_restart:%d is %s" % (iproc, count, str(adjust_left)))
         if(useSchurs):
             Pr = r[len(fi):]
             #Now do the actual gmres solver to get a new guess
@@ -820,8 +821,8 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
         residual = np.linalg.norm(yguess_new - yguess)
         yguess = yguess_new    
         #Alwayts stop if the residual keeps on going down
-        if(residual < tol):
-            break
+        #if(residual < tol):
+         #   break
     
     #Now commmunicate what's left
     interface_y = communicate_interface(iproc, nproc, yguess)
@@ -1125,7 +1126,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     print(local_inputs)
     #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
     inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
-         (iproc == 0), niter=10, num_restarts=1, tol = 1e-6)
+         (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
 
     print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))
     
