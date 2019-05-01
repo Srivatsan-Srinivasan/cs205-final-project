@@ -47,126 +47,11 @@ def permute_sparse_matrix(M, orderRow, orderCol):
     return M2
 
 
-def multigrid_wrapper(A, rhs, init_level, terminal_level, pMethod='identity', nMethod='given',
-                      pInput=None, nInput=None, useTerminalMPI=False):
-    if(useTerminalMPI and MPI.COMM_WORLD.Get_size() > 1):
-        nCnt = MPI.COMM_WORLD.Get_size()
-        rank = MPI.COMM_WORLD.Get_rank()
-        if(rank == 0):
-            to_distribute
-    else:
-        return(multigrid(A, rhs, init_level, terminal_level, pMethod=pMethod,
-                         nMethod=nMethod, pInput=pInput, nInput=nInput, useTerminalMPI=False,
-                         hack=False))
-
-
-def hack_multigrid(A, rhs, current_level, terminal_level,
-                   pMethod='identity', nMethod='given', pInput=None, nInput=None,
-                   useTerminalMPI=False, model=None):
-    '''Please dont use this unnless, necessary..this is really meant to just get a simple way
-    of this to work for MPI'''
-
-    if(pMethod == 'given'):
-        if(len(pInput) != terminal_level - current_level):
-            raise ValueError("Needs to be consistent")
-        else:
-            A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])
-            rhs = rhs[pInput[0][0]]
-
-          # TODO Should be a bit more dynamic put will set to identity:
-            pMethod = 'identity'
-
-    if(nMethod == 'given'):
-        if(len(nInput) != terminal_level - current_level + 1):
-            raise ValueError("Needs to be consistent")
-        else:
-            nrows = nInput[0]
-            if(terminal_level != current_level):
-                nInput = nInput[1:]
-
-    # Split input matrix based on nrows
-    # TODO: Actual algorithm for nrwos.
-    A = A.tocsr()
-    B0 = A[:nrows, :nrows]
-    F0 = A[:nrows, nrows:]
-    E0 = A[nrows:, :nrows]
-    C0 = A[nrows:, nrows:]
-
-    # Same for f0. f0 is the stuff that can be computed independently,
-    # g0 is the stuff that can't be
-    f0 = rhs[:nrows]
-    g0 = rhs[nrows:]
-
-    L0 = sparse.eye(B0.shape[0])
-    U0 = B0
-    # Since B0 is diagonal can do this
-    inv_U0 = sparse.diags(1/B0.diagonal())
-
-    # Use Schur's complement
-    inv_L0 = L0
-    G0 = E0 * inv_U0
-    W0 = inv_L0 * F0
-    A1 = C0 - G0 * W0
-
-    # Forward/backwards substiution
-    f0_prime = sparse.linalg.spsolve_triangular(L0, f0)
-    f0_prime = f0_prime.reshape(len(f0_prime), 1)
-    g0_prime = g0 - G0 * f0_prime
-
-    nrows2 = nInput[0]
-    B1 = A1[:nrows2, :nrows2]
-    F1 = A1[:nrows2, nrows2:]
-    E1 = A1[nrows2:, :nrows2]
-    C1 = A1[nrows2:, nrows2:]
-
-    f1 = g0_prime[:nrows2]
-    g1 = g0_prime[nrows2:]
-
-    # At this point either use single process or multiprocess
-    if(useTerminalMPI):
-        r2 = split_to_distributed(model, Ar, g0_prime, 1)
-        y0 = run_distributed(r2)
-#        y0 = distrbuted_multigrid(B1, model)
-    else:
-        ILU = sparse.linalg.spilu(B1)
-        (L1, U1) = (ILU.L, ILU.U)
-        G1 = sparse.linalg.spsolve_triangular(U1.T, (E1.T).todense())
-        W1 = sparse.linalg.spsolve_triangular(L1, F1.todense())
-        A2 = C1 - G1.T * W1
-        f1_prime = sparse.linalg.spsolve_triangular(L1, f1)
-        f1_prime = f1_prime.reshape(len(f1_prime), 1)
-        inner = G1.T * f1_prime
-     #       inner = inner.reshape((len(inner), 1))
-        g1_prime = g1 - inner
-
-        # More backsolve
-        y1 = spsolve(A2, g1_prime)
-        y1 = y1.reshape(len(y1), 1)
-        u1 = sparse.linalg.spsolve_triangular(
-            U1, (f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
-        u1 = u1.reshape(len(u1), 1)
-        y0 = np.concatenate((u1, y1))
-        u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
-        u0 = u0.reshape(len(u0), 1)
-        y0 = np.concatenate((u0, y0))
-
-    if(pInput != None):
-        new_col_inds = pInput[0][1]
-        y0_reorder = np.zeros_like(y0)
-        for i in range(0, len(y0)):
-            itemindex = np.where(new_col_inds == i)[0]
-            y0_reorder[i] = y0[itemindex]
-        y0 = y0_reorder
-    return y0
 
 
 def multigrid(A, rhs, current_level, terminal_level,
               pMethod='identity', nMethod='given', pInput=None, nInput=None,
               useTerminalMPI=False, model=None, hack=False):
-    if(hack):
-        return(hack_multigrid(A, rhs, current_level, terminal_level, pMethod=pMethod,
-                              nMethod=nMethod, pInput=pInput, nInput=nInput,
-                              useTerminalMPI=useTerminalMPI, model=model))
     # TODO: Should check if it's part of the enum
     if(pMethod == 'given'):
         if(len(pInput) != terminal_level - current_level):
@@ -253,14 +138,16 @@ def multigrid(A, rhs, current_level, terminal_level,
         y0 = np.concatenate((u0, y0))
 
         if(pInput != None):
-            new_col_inds = pInput[0][1]
-            y0_reorder = np.zeros_like(y0)
-            for i in range(0, len(y0)):
-                itemindex = np.where(new_col_inds == i)[0]
-                y0_reorder[i] = y0[itemindex]
-            y0 = y0_reorder
+            y0 = repermute(y0, pInput[0][1])
         return y0
 
+
+def repermute(y0, new_col_inds):
+    y0_reorder = np.zeros_like(y0)
+    for i in range(0, len(y0)):
+        itemindex = np.where(new_col_inds == i)[0]
+        y0_reorder[i] = y0[itemindex]
+    return(y0_reorder)
 
 def run_sample():
     '''Easy test - no permutaion'''
@@ -752,19 +639,11 @@ def find_reordering(model):
 
 
 
-#AB = run_sample()
-#ABCD = run_sample2()
-#ABCD_two = run_sample2()
-#akc = run_many()
-
-
 def fwd_back(b, L, U):
     '''SImple forward bck sub'''
     inter = sparse.linalg.spsolve_triangular(L, b)
     x = sparse.linalg.spsolve_triangular(U, inter, False)
     return(x)
-
-
 
 
 def get_S(L, U, num=33):
@@ -828,10 +707,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
 	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
         if(useSchurs):
             Pr = r[len(fi):]
-            yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, r, restart = None)[0]
-            print(yguess)
-            #Now do the actual gmres solver to get a new guess
-            #yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+            yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
             
         else:
             Hi = Ai[len(fi):, :len(fi)]
@@ -1102,7 +978,8 @@ def revert_ordering(ordering):
     return(inds)
 
 
-def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
+def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True, 
+                    useMPI_2 = False):
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
     inode = MPI.Get_processor_name()
@@ -1141,47 +1018,54 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
   #  split_solve = None
     #MPI.COMM_WORLD.Barrier().
     split_solve = None    
+    res = None
     if(iproc == 0):
         newA= combined[0][0].copy()
         newG = combined[0][1].copy()
         for i in range(1, len(combined)):
             newA += combined[i][0]
             newG += combined[i][1]
+        if(useMPI_2 == True):
         #Note that this ordering has the last processor as the "contigency one"
-        split_solve = distrubted_calc(model, newA, newG, ncont)
-        #for i in range(0, ncont + 1):
-         #   split_solve[i+1].append(combined[i][3])
-          #  split_solve[i+1].append(combined[i][4])
-          #  split_solve[i+1].append(combined[i][5])
+            split_solve = distrubted_calc(model, newA, newG, ncont)
+            print("Split solve from %d has %s" % (iproc, str(split_solve)))  
+ 
 
-       # split_solve[0].append(combined[i][3])
-       # split_solve[0].append(combined[i][4])
-       # split_solve[0].append(combined[i][5])
+        else:
+            y1 = sparse.linalg.gmres(newA, newG)[0]
+            y1 = y1.reshape(len(y1), 1)
+            B = sparse.block_diag([combined[i][3] for i in range(0, len(combined)) ])
+            F = sparse.vstack([combined[i][4] for i in range(0, len(combined)) ])
+            f = np.vstack([combined[i][5] for i in range(0, len(combined)) ])
+            u0 = sparse.linalg.spsolve_triangular(B, f  - F * y1 , False )
+            u0 = u0.reshape(len(u0), 1)
+            y0 = np.concatenate((u0, y1))
+        
+        res = repermute(y0, inds[1])
+        
+    #    return(res)
     
+    if(useMPI_2 == True):
+        local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
+        print("Local input %d has %s" % (iproc, str(local_inputs)))
+        print(local_inputs)
+                #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
+        inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2],
+                                              (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
+        print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))    
+        combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
+        res = combined2
 
-    print("Split solve from %d has %s" % (iproc, str(split_solve)))  
-    local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
-    print("Local input %d has %s" % (iproc, str(local_inputs)))
-    print(local_inputs)
-    #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
-    inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2],
-         (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
-
-    print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))
-    
-    combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
-    return(combined2)
+    return(res)
 '''
 res1 = []
 for i in range(0, len(split_solve)):
     local_inputs = split_solve[i]
     inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
                                      # local_inputs[3], local_inputs[4], local_inputs[5]
-         (i == 2), niter=10, num_restarts=10, tol = 1e-6)
+         (i == 0), niter=10, num_restarts=10, tol = 1e-6)
     res1.append(inner_soln)
-   
-    '''
-'''
+
 
 #a2 = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], False)
 #local_inputs = split_solve[0]
@@ -1234,7 +1118,7 @@ def shift_C0(C, ncont, inds):
 
 if __name__ == '__main__':
 
-  # ABCD = run_sample2()
+#   ABCD = run_sample2()
 
     run_run_sample4()
 #
