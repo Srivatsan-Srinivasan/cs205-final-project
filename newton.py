@@ -773,8 +773,21 @@ def get_S(L, U, num=33):
     return(L[num:, num:], U[num:, num:])
 
 
+def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
+    
+    local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
+                                         num_restarts=num_restarts, tol=tol)
+    (uli, yli) = local_soln
+    
+ #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
 
-def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 1, tol = 1e-6):
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F * local_soln, False)
+    u10 = ul0.reshape(len(ul0), 1)
+    return((u10, local_soln))
+
+    
+
+def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
     '''Distributed gmres solver'''
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
@@ -790,10 +803,11 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     (L, U, L_inner, U_inner) = (None, None, None, None)
     #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
     if(useSchurs):
-        ILU = sparse.linalg.spilu(Ai)
-        (L, U) = (ILU.L, ILU.U)
-        (L_inner, U_inner) = get_S(L, U, len(fi))
-        r = fwd_back(combined, L, U)
+      #  ILU = sparse.linalg.spilu(Ai)
+       # (L, U) = (ILU.L, ILU.U)
+        #(L_inner, U_inner) = get_S(L, U, len(fi))
+        #r = fwd_back(combined, L, U)
+        r = sparse.linalg.gmres(Ai, combined)
     (Hi, dx, Bi, Hi) = (None, None, None, None)
      
   #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
@@ -802,13 +816,18 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
         # Get the interface components for all processors as per algo2/3
-        interface_y = communicate_interface(iproc, nproc, yguess)
-        #Do the dot product
-        adjust_left = interface_dotProd(interface_y, Hips)
+        if(nproc == 1 ):
+            adjust_left = np.zeros_like(yguess)
+        else:
+            interface_y = communicate_interface(iproc, nproc, yguess)
+            #Do the dot product
+            adjust_left = interface_dotProd(interface_y, Hips)
         if(useSchurs):
             Pr = r[len(fi):]
+            yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, yguess, restart = None)[0]
+            print(yguess)
             #Now do the actual gmres solver to get a new guess
-            yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
+            #yguess_new = gmres_solver_inner(L_inner, U_inner, Pr, yguess, adjust_left, niter, tol)
             
         else:
             Hi = Ai[len(fi):, :len(fi)]
@@ -818,15 +837,17 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
         
         residual = np.linalg.norm(yguess_new - yguess)
-        yguess = yguess_new    
+        yguess = np.reshape(yguess_new, yguess.shape)    
         #Alwayts stop if the residual keeps on going down
         if(residual < tol):
             break
     
     #Now commmunicate what's left
-    interface_y = communicate_interface(iproc, nproc, yguess)
-    t = interface_dotProd(interface_y, Hips)
-    
+    if(nproc != 1):
+        interface_y = communicate_interface(iproc, nproc, yguess)[0]
+        t = interface_dotProd(interface_y, Hips)
+    else:
+        t = np.zeros_like(gi)
     #Subtract it out and do a final solve
     gi = gi - t
     
@@ -844,10 +865,12 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
         else:
             combined = gi
     #    combined = np.concatenate((fi, gi.flatten()))
-        combined_soln = fwd_back(combined, L, U)
+        combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
     return(combined_soln)
         
-
+#gmres_solver_wrapper(newA, np.zeros((0, 1)), newG, [], True)
+    
+    
 def communicate_interface(iproc, nproc, toSend, useMPI = True):
     if(not useMPI):
         return([np.zeros_like(toSend)])
@@ -906,7 +929,7 @@ def get_interface(a, b):
 
 def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined = np.concatenate((fi, gi))
-    ILU = sparse.linalg.spilu(Ai)
+    ILU = sparse.linalg.spilu(Ai,drop_tol = 0)
     (L1, U1) = (ILU.L, ILU.U)
     yi = 0
     r = fwd_back(combined, L1, U1)
@@ -939,6 +962,9 @@ def grimes_solver(Ai, fi, gi, niter, useMPI=False):
     combined = np.concatenate((fi, gi))
     combined_soln = fwd_back(combined, L1, U1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
+
+
+#grimes_solver_wrapper(newA, np.zeros((0, 1)), newG, 10)
 
 def structure(model_path):
     nproc = MPI.COMM_WORLD.Get_size()
@@ -1112,31 +1138,54 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname):
     #MPI.COMM_WORLD.Barrier().
     split_solve = None    
     if(iproc == 0):
-        newA= combined[0][0]
-        newG = combined[0][1]
-        for i in range(1, len(combined[0])):
+        newA= combined[0][0].copy()
+        newG = combined[0][1].copy()
+        for i in range(1, len(combined)):
             newA += combined[i][0]
             newG += combined[i][1]
         #Note that this ordering has the last processor as the "contigency one"
         split_solve = distrubted_calc(model, newA, newG, ncont)
+        #for i in range(0, ncont + 1):
+         #   split_solve[i+1].append(combined[i][3])
+          #  split_solve[i+1].append(combined[i][4])
+          #  split_solve[i+1].append(combined[i][5])
+
+       # split_solve[0].append(combined[i][3])
+       # split_solve[0].append(combined[i][4])
+       # split_solve[0].append(combined[i][5])
+    
+
     print("Split solve from %d has %s" % (iproc, str(split_solve)))  
     local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
     print("Local input %d has %s" % (iproc, str(local_inputs)))
     print(local_inputs)
     #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
     inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
-         (iproc == 0), niter=10, num_restarts=1, tol = 1e-6)
+                                      #local_inputs[3], local_inputs[4], local_inputs[5]
+         (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
 
     print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))
     
-    combined2 = MPI.COMM_WORLD.gather(inner_soln, root = nproc - 1)
+    combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
     return(combined2)
-
+'''
+res1 = []
+for i in range(0, len(split_solve)):
+    local_inputs = split_solve[i]
+    inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
+                                     # local_inputs[3], local_inputs[4], local_inputs[5]
+         (i == 2), niter=10, num_restarts=10, tol = 1e-6)
+    res1.append(inner_soln)
+   
+    '''
+'''
 
 #a2 = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], False)
 #local_inputs = split_solve[0]
 #test_sol = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2], 
 #         niter=10, num_restarts=1, tol = 1e-6)
+
+'''
 
 
 def run_run_sample4():
@@ -1152,7 +1201,7 @@ def local_schurs(inputs):
     A1_local = C - E * sparse.diags(1/B.diagonal()) * F
     g1_local = g - E * sparse.diags(1/B.diagonal()) * f
 
-    return((A1_local, g1_local, u))
+    return((A1_local, g1_local, u, B, F, f))
 #        temp_res = c - e * sparse.diags(1/b.diagonal()) * f
 
 
@@ -1181,7 +1230,8 @@ def shift_C0(C, ncont, inds):
 
 
 if __name__ == '__main__':
-    #ABCD = run_sample2()
+
+  # ABCD = run_sample2()
 
     run_run_sample4()
 #
