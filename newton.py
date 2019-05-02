@@ -160,7 +160,7 @@ def run_sample():
     return(res)
 
 
-def run_sample2():
+def run_sample2(method = 'standard'):
     '''More complicated - actually create block diagnal matrix and permute'''
     (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
     model_data = sio.loadmat(mname)
@@ -169,7 +169,7 @@ def run_sample2():
     rhs = sio.loadmat(rhsname)['rhs']
 
     M_n = create_M_newton(model_data, y0_data, constr_data)
-    (inds, nrows) = find_reordering(model_data['model'])
+    (inds, nrows) = find_reordering(model_data['model'], method=method)
 
     mlSolve = multigrid(M_n, rhs, 0, 1, 'given', 'given', [
                         inds], nrows, model=model_data['model'])
@@ -519,13 +519,16 @@ def distrubted_calc(model, A, rhs, num_cont):
     return(grouped)
 
 
-def find_reordering(model):
+def find_reordering(model, method = "grouped"):
     '''The algorithm here is to permute to get the same type of variables together. 
     Roughtly speaking instead of grouping by contingency directly we want to group by 
     theta variables, lambda variables etc. This somehow gives us a very diagonal 
     B0 matrix which is really easy to work with. 
     '''
-
+    if(method not in ['standard', 'grouped']):
+        raise ValueError("Invalid method supplied")
+    #Method types are standard (group lambdas together and then group (nu/theta))
+    # grouped is grouping all lambdas together than all nus and then all thetas
     ncont = len(model[0][0][1][0]) - 1
     inds = {'deltaTheta': [], 'deltaLambda': [], 'deltaNu': [],
             'rDual': [], 'rCent': [], 'rPri': []}
@@ -588,19 +591,19 @@ def find_reordering(model):
         new_column_inds[shift:dim_th + shift] = inds['deltaTheta'][k]
         shift += dim_th
 
-        dim_neq = dims[dim_mapping['neq']][0][0]
-        new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
-        shift += dim_neq
-        '''
-
-    
-    for k in range(0, ncont + 1):
-        (dims, dim_mapping) = get_specific_dim(model, k)
-        dim_neq = dims[dim_mapping['neq']][0][0]          
-        new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
-        shift += dim_neq
-        '''
-
+        if(method == 'grouped'):
+            dim_neq = dims[dim_mapping['neq']][0][0]
+            new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
+            shift += dim_neq
+        
+       
+    if(method == "standard"):
+        for k in range(0, ncont + 1):
+            (dims, dim_mapping) = get_specific_dim(model, k)
+            dim_neq = dims[dim_mapping['neq']][0][0]          
+            new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
+            shift += dim_neq
+       
     new_column_inds[shift:p+shift] = inds['deltaP']
     shift += p
 
@@ -621,19 +624,19 @@ def find_reordering(model):
         new_rows_inds[shift2:dim_th + shift2] = inds['rDual'][k]
         shift2 += dim_th
 
-        dim_neq = dims[dim_mapping['neq']][0][0]
-        new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
-        shift2 += dim_neq
+        if(method == "grouped"):
+            dim_neq = dims[dim_mapping['neq']][0][0]
+            new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
+            shift2 += dim_neq
 
     new_rows_inds[shift2:p + shift2] = inds['rdualP']
     shift2 += p
-    '''
-    for k in range(0, ncont + 1):
-        (dims, dim_mapping) = get_specific_dim(model, k)
-        dim_neq= dims[dim_mapping['neq']][0][0]
-        new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
-        shift2 += dim_neq
-    '''
+    if(method == 'standard'):
+        for k in range(0, ncont + 1):
+            (dims, dim_mapping) = get_specific_dim(model, k)
+            dim_neq= dims[dim_mapping['neq']][0][0]
+            new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
+            shift2 += dim_neq
 
     return([new_rows_inds, new_column_inds, inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]])
 
@@ -995,7 +998,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         model = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
-        (inds, nrows) = find_reordering(model_data['model'])
+        (inds, nrows) = find_reordering(model_data['model'], method = "grouped" )
         M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
         rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
@@ -1032,6 +1035,41 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
  
 
         else:
+            #TODO: combine code together...
+            cut = nrows[1]
+            B0 = newA[:cut, :cut]
+            F0 = newA[:cut, cut:]
+            E0 = newA[cut:, :cut]
+            C0 = newA[cut:, cut:]
+        
+            # Same for f0. f0 is the stuff that can be computed independently,
+            # g0 is the stuff that can't be
+            f0 = newG[:cut]
+            g0 = newG[cut:]
+        
+            # Direct Solve via ILU
+        
+            ILU = sparse.linalg.spilu(B0)
+            (L1, U1) = (ILU.L, ILU.U)
+            G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
+            W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
+            A2 = C0 - G1.T * W1
+            
+                    # Backsolve
+            f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
+            f1_prime = f1_prime.reshape(len(f1_prime), 1)
+            inner = G1.T * f1_prime
+             #       inner = inner.reshape((len(inner), 1))
+            g1_prime = g0 - inner
+            
+                    # More backsolve
+            y1 = spsolve(A2, g1_prime)
+            y1 = y1.reshape(len(y1), 1)
+            u1 = sparse.linalg.spsolve_triangular(
+            U1, (f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
+            u1 = u1.reshape(len(u1), 1)
+            y0 = np.concatenate((u1, y1))
+            
             y1 = sparse.linalg.gmres(newA, newG)[0]
             y1 = y1.reshape(len(y1), 1)
             B = sparse.block_diag([combined[i][3] for i in range(0, len(combined)) ])
@@ -1040,8 +1078,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
             u0 = sparse.linalg.spsolve_triangular(B, f  - F * y1 , False )
             u0 = u0.reshape(len(u0), 1)
             y0 = np.concatenate((u0, y1))
-        
-        res = repermute(y0, inds[1])
+            res = repermute(y0, inds[1])
         
     #    return(res)
     
@@ -1118,7 +1155,7 @@ def shift_C0(C, ncont, inds):
 
 if __name__ == '__main__':
 
-#   ABCD = run_sample2()
+   #ABCD = run_sample2('standard')
 
     run_run_sample4()
 #
