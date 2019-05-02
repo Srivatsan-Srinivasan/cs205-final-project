@@ -1002,7 +1002,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         model = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
-        (inds, nrows) = find_reordering(model_data['model'], method = "grouped" )
+        (inds, nrows) = find_reordering(model_data['model'], method = "standard" )
         M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
         rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
@@ -1129,7 +1129,7 @@ for i in range(0, len(split_solve)):
 
 
 def run_run_sample4():
-    (mname, rhsname, yname, cname) = get_names(2224, 2, "Data")
+    (mname, rhsname, yname, cname) = get_names(2224, 6, "Data")
     print("Running a simple test")
     res = run_sample4(mname, rhsname, yname, cname)
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
