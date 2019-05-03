@@ -45,16 +45,16 @@ def get_model_specific(model_data, constr_num):
 
 def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
     '''
-    Given the model, some B (in Ax=B) variable, some x (in Ax=B) variables constructs
+    Given the model, Y0 variables (per paper), constraint data file matrix, constructs
     the newton block diagonal matrix per paper.
 
     Args:
-        model_data: loaded model data file matrix
-        y0_data: some x (in Ax=B) variables data file matrix
-        constr_data: constraint data file matrix
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        constr_data (scipy.sparse or numpy matrices): constraint data file matrix
 
     Returns:
-        newton_matrix: newton block diagonal matrix per paper
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
     '''
 
     dim_y0_mapping = make_mapping(y0_data[0])

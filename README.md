@@ -47,3 +47,15 @@ $ source activate cs205_env
 $ python newton_serial.py
 
 expected timing: ~ 193.45466351509094s
+
+--ntasks=1 --ntasks-per-node=1 --cpus-per-task=1 --mem-per-cpu 16GB   
+--ntasks=1 --ntasks-per-node=1 --cpus-per-task=8 --mem-per-cpu 16GB   
+--ntasks=1 --ntasks-per-node=1 --cpus-per-task=32 --mem-per-cpu 16GB 
+
+--ntasks=8 --ntasks-per-node=1 --cpus-per-task=1 --mem-per-cpu 12GB  
+srun -p test --pty --ntasks=8 --ntasks-per-node=1 --cpus-per-task=1 -t 0-01:00 --mem-per-cpu=12000 /bin/bash
+
+--ntasks=8 --ntasks-per-node=1 --cpus-per-task=8 --mem-per-cpu 2GB
+
+
+--ntasks=8 --ntasks-per-node=1 --cpus-per-task=4
