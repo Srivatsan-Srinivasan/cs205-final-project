@@ -21,6 +21,10 @@ from mpi4py import MPI
 import scipy.linalg as spla
 # from enum import Enum     # for enum34, or the stdlib version
 import scipy
+import logging
+
+logging.basicConfig(stream=sys.stdout,format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
+
 #PMethod= Enum('PMethod', 'given')
 #nrowMethod = Enum("nrowMethod", "given")
 
@@ -998,7 +1002,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         model = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
-        (inds, nrows) = find_reordering(model_data['model'], method = "grouped" )
+        (inds, nrows) = find_reordering(model_data['model'], method = "standard" )
         M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
         rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
@@ -1015,6 +1019,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
     '''
     local_data = MPI.COMM_WORLD.scatter(splits, root=0)
     print("I am proc %d and I've received some data" % iproc)
+    sys.stdout.flush()
     (res) = local_schurs(local_data)
     combined = MPI.COMM_WORLD.gather(res, root=0)
  #   combined = list(map(local_schurs, splits))
@@ -1032,10 +1037,12 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         #Note that this ordering has the last processor as the "contigency one"
             split_solve = distrubted_calc(model, newA, newG, ncont)
             print("Split solve from %d has %s" % (iproc, str(split_solve)))  
- 
+            sys.stdout.flush()
 
         else:
+            print("Going local route... with %d" % iproc)
             #TODO: combine code together...
+            sys.stdout.flush()
             cut = nrows[1]
             B0 = newA[:cut, :cut]
             F0 = newA[:cut, cut:]
@@ -1047,13 +1054,17 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
             f0 = newG[:cut]
             g0 = newG[cut:]
         
+            print("Finished split8ing with %d %s" % (iproc, str(B0.shape)))
             # Direct Solve via ILU
-        
-            ILU = sparse.linalg.spilu(B0)
+            sys.stdout.flush()
+            ILU = sparse.linalg.spilu(B0 + 1e-4 * sparse.eye(B0.shape[0]))
             (L1, U1) = (ILU.L, ILU.U)
+            logging.info("Finishing ILU")
+            sys.stdout.flush()
             G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
             W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
             A2 = C0 - G1.T * W1
+            logging.info("Fininsihed A2")
             
                     # Backsolve
             f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
@@ -1061,21 +1072,26 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
             inner = G1.T * f1_prime
              #       inner = inner.reshape((len(inner), 1))
             g1_prime = g0 - inner
-            
-                    # More backsolve
+            logging.info("Finishing g1_prime")
+                   # More backsolve
             y1 = spsolve(A2, g1_prime)
+            logging.info("Finishing direct solve")
             y1 = y1.reshape(len(y1), 1)
             u1 = sparse.linalg.spsolve_triangular(
             U1, (f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
+            logging.info("Finished backsub")
             u1 = u1.reshape(len(u1), 1)
-            y0 = np.concatenate((u1, y1))
-            
-            y1 = sparse.linalg.gmres(newA, newG)[0]
-            y1 = y1.reshape(len(y1), 1)
+            y1 = np.concatenate((u1, y1))
+            #logging.info("Starting GMRES")
+            #y1 = sparse.linalg.gmres(newA, newG)[0]
+            #logging.info("Ending GMRES")
+            #y1 = y1.reshape(len(y1), 1)
             B = sparse.block_diag([combined[i][3] for i in range(0, len(combined)) ])
             F = sparse.vstack([combined[i][4] for i in range(0, len(combined)) ])
             f = np.vstack([combined[i][5] for i in range(0, len(combined)) ])
+            logging.info("Finsihed constructing")
             u0 = sparse.linalg.spsolve_triangular(B, f  - F * y1 , False )
+            logging.info("Finsihing backsolve")
             u0 = u0.reshape(len(u0), 1)
             y0 = np.concatenate((u0, y1))
             res = repermute(y0, inds[1])
@@ -1113,7 +1129,7 @@ for i in range(0, len(split_solve)):
 
 
 def run_run_sample4():
-    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
+    (mname, rhsname, yname, cname) = get_names(2224, 6, "Data")
     print("Running a simple test")
     res = run_sample4(mname, rhsname, yname, cname)
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
