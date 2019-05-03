@@ -517,9 +517,14 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
    # to_split_arr.append()
 
 
-def distrubted_calc(model, A, rhs, num_cont):
+def distrubted_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
-    grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
+    if(otherData is not None):
+        if(moveZero == True):
+            otherData = otherData.insert(0, otherData.pop())
+        grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
+    else:
+        grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
     return(grouped)
 
 
@@ -664,6 +669,7 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
+    #(B, F, f) = otherData
     
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
 
@@ -1033,9 +1039,10 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         for i in range(1, len(combined)):
             newA += combined[i][0]
             newG += combined[i][1]
+        otherInfo = [(x[3], x[4], x[5]) for x in combined]
         if(useMPI_2 == True):
         #Note that this ordering has the last processor as the "contigency one"
-            split_solve = distrubted_calc(model, newA, newG, ncont)
+            split_solve = distrubted_calc(model, newA, newG, ncont, otherInfo, moveZero = True)
             print("Split solve from %d has %s" % (iproc, str(split_solve)))  
             sys.stdout.flush()
 
@@ -1100,14 +1107,27 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
     
     if(useMPI_2 == True):
         local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
+        (B, F, f) = local_inputs[-1]
         print("Local input %d has %s" % (iproc, str(local_inputs)))
         print(local_inputs)
                 #print("Local inputs from %d are %s, %s, %s, %s" %(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2]))
-        inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2],
-                                              (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
+        #inner_soln = gmres_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], local_inputs[2],
+         #                                     (iproc == 0), niter=10, num_restarts=10, tol = 1e-6)
+        
+        
+        inner_soln = outer_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
+                             local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
+                             tol = 1e-6)
         print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))    
+       
+        
         combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
-        res = combined2
+        us =  [u for u in combined2[0]]
+        ys = [y for y in combined2[1]]
+        us = np.concatenate(us)
+        ys = np.concatenate(ys)
+        res = np.concatenate((us, ys))
+        res = repermute(res, inds[1])
 
     return(res)
 '''
