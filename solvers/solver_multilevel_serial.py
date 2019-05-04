@@ -1,7 +1,8 @@
 '''
-SERIAL UNOPTIMIZED SOLVER
+SERIAL MULTILEVEL SOLVER
 
-Serial Codes for Newton Step Solver in Security Constrained Optimal Power Flow
+Serial Codes for Multi-Level Algebraic Solver for Parallelized Newton Step 
+in Security Constrained Optimal Power Flow
 
 CS205 Spring 2019, Final Project
 Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
@@ -13,9 +14,11 @@ from .utils import get_filepaths
 from .utils import load_filepaths
 from .utils import calculate_residuals
 from scipy import sparse
-from scipy.sparse.linalg import lsqr
 
 from .solver_utils import construct_NewtonBDMatrix
+from .solver_utils import permute_NewtonBDMatrix
+from .solver_utils import multigrid
+from .solver_utils import permute_sparse_matrix
 
 def _load_data(bus_count, constr_count):
     '''
@@ -62,11 +65,13 @@ def _construct_newton(model_data, y0_data, constr_data):
 
     newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
 
-    logging.info('finished constructing newton matrix.')
+    inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
 
-    return newton_matrix
+    logging.info('finished constructing newton matrix.')    
 
-def _solver(newton_matrix, rhs_data):
+    return newton_matrix, inds, nrows
+
+def _solver(newton_matrix, inds, nrows, rhs_data):
     '''
     Given the newton block diagonal matrix per paper, RHS variables (per paper) solves
     the system of equations.
@@ -82,7 +87,7 @@ def _solver(newton_matrix, rhs_data):
     #naively find the least-squares solution to the system of equations.
     logging.info('solving system ...')
 
-    soln = sparse.linalg.lsqr(newton_matrix, rhs_data)[0]
+    soln = multigrid(newton_matrix, rhs_data, 0, 1, 'given', 'given', [inds], nrows)
 
     logging.info('finished solving system.')
 
@@ -93,6 +98,6 @@ def solve(bus_count, constr_count):
     # load data, construct newton matrix, solve newton step
     model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
 
-    newton_matrix = _construct_newton(model_data, y0_data, constr_data)
+    newton_matrix, inds, nrows = _construct_newton(model_data, y0_data, constr_data)
 
-    return _solver(newton_matrix, rhs_data)
+    return _solver(newton_matrix, inds, nrows, rhs_data)
