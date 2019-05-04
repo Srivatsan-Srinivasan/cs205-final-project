@@ -52,16 +52,12 @@ def profile_callgraph(fn):
     logging.info('PROFILING CALL GRAPH ...')
 
     config = Config()
-    # config.trace_filter = GlobbingFilter(exclude=[
-    #     'ModuleSpec.*',
-    #     'logging.*',
-    #     '*_handle_fromlist*',
-    #     'multiprocessing.*',
-    #     'threading.*'
-    # ])
-
-    config.trace_filter = GlobbingFilter(exclude=[        
-        'logging.*'
+    config.trace_filter = GlobbingFilter(exclude=[
+        'ModuleSpec.*',
+        'logging.*',
+        '*_handle_fromlist*',
+        'multiprocessing.*',
+        'threading.*'
     ])
 
     graphviz = GraphvizOutput(output_file='profile_example.png')
