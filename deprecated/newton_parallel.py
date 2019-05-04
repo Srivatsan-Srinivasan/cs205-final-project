@@ -717,7 +717,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             adjust_left = interface_dotProd(interface_y, Hips)
             print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
             print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
-	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
+    #print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
         if(useSchurs):
             Pr = r[len(fi):]
             yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
@@ -790,7 +790,7 @@ def interface_dotProd(interface_y, Hips):
     for index in range(0, len(Hips)):
         print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
         temp = Hips[index] * interface_y[index]
-	#print('hi')	
+    #print('hi')    
         adjust_left += temp
     return(adjust_left)
             
@@ -1015,7 +1015,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
 
         (splits, _) = split_bigM(
             M_n, rhs, nrows[0], ncont, None, model_data['model'], inds[2])
-	#print("I am proc %d and i'm sending data" % iproc)
+    #print("I am proc %d and i'm sending data" % iproc)
     #print(len(splits))
     '''
         if len(splits) != nproc:
@@ -1149,13 +1149,9 @@ for i in range(0, len(split_solve)):
 
 
 def run_run_sample4():
-    (mname, rhsname, yname, cname) = get_names(189, 5, "Data")
+    (mname, rhsname, yname, cname) = get_names(2224, 6, "Data")
     print("Running a simple test")
-    import time
-    sTime = time.time()
     res = run_sample4(mname, rhsname, yname, cname)
-    eTime = time.time() - sTime
-    print('wrapper timing: {}s'.format(eTime))
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
     print(res)
 
@@ -1207,8 +1203,8 @@ if __name__ == '__main__':
 #        run_main():
 #    else:
 #        side_process_path(iproc, nproc)
-#	MPI.COMM_WORLD.Barrier()
-#	if iproc == i :
-#		print('Rank %d out of %d' % (iproc,nproc))
+#   MPI.COMM_WORLD.Barrier()
+#   if iproc == i :
+#       print('Rank %d out of %d' % (iproc,nproc))
 #
 # MPI.Finalize()
