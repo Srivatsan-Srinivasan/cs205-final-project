@@ -52,12 +52,16 @@ def profile_callgraph(fn):
     logging.info('PROFILING CALL GRAPH ...')
 
     config = Config()
-    config.trace_filter = GlobbingFilter(exclude=[
-        'ModuleSpec.*',
-        'logging.*',
-        '*_handle_fromlist*',
-        'multiprocessing.*',
-        'threading.*'
+    # config.trace_filter = GlobbingFilter(exclude=[
+    #     'ModuleSpec.*',
+    #     'logging.*',
+    #     '*_handle_fromlist*',
+    #     'multiprocessing.*',
+    #     'threading.*'
+    # ])
+
+    config.trace_filter = GlobbingFilter(exclude=[        
+        'logging.*'
     ])
 
     graphviz = GraphvizOutput(output_file='profile_example.png')
@@ -107,4 +111,22 @@ def check_residuals(fn, sample_bus_count, sample_constr_count):
 
     #report residuals
     logging.info('residue={:3f}.'.format(residuals))
+    pickle.dump(residuals, open('residuals_example.out', 'wb'))
+
+
+def check_residuals_static(soln, sample_bus_count, sample_constr_count):
+
+    #calculate the residuals for proposed solution
+    logging.info('calculating residuals ...')
+    fnames = get_filepaths(sample_bus_count, sample_constr_count, 'Data')
+    model_data, rhs_data, y0_data, constr_data = load_filepaths(*fnames)
+    newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
+
+    residuals = calculate_residuals(newton_matrix, rhs_data, soln)
+    logging.info('finished calculating residuals.')
+
+    #report residuals
+    logging.info('residue={:3f}.'.format(residuals))
+    #temporary hack around
+    print('residue={:3f}.'.format(residuals))
     pickle.dump(residuals, open('residuals_example.out', 'wb'))

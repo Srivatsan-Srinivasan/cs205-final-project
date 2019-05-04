@@ -410,3 +410,152 @@ def multigrid(A, rhs, current_level, terminal_level,
         if(pInput != None):
             y0 = repermute(y0, pInput[0][1])
         return y0
+
+def split_newton_matrix(A, rhs, nrows, ncont, nprocess, model, inds):
+
+    B0 = A[:nrows, :nrows]
+    F0 = A[:nrows, nrows:]
+    E0 = A[nrows:, :nrows]
+    C0 = A[nrows:, nrows:]
+
+    f0 = rhs[:nrows]
+    g0 = rhs[nrows:]
+    (Bs, Fs, Es, Cs, gs, fs, us) = ([], [], [], [], [], [], [])
+    
+    (start_b, start_f_col, start_f_row, start_e_col, start_e_row,
+     start_c_col, start_c_row) = (0, 0, 0, 0, 0, 0, 0)
+    for k in range(0, ncont + 1):
+        l_cut = len(inds['deltaLambda'][k])
+        Bs.append(B0[start_b:start_b + l_cut, start_b:start_b + l_cut])
+        us.append(f0[start_b:start_b + l_cut])
+        start_b += l_cut
+        th_cut = (len(inds['deltaTheta'][k]))
+
+        Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+        fs.append(f0[start_f_row:start_f_row + l_cut])
+
+        start_f_row += l_cut
+        start_f_col += th_cut
+        Es.append(E0[:, start_e_col:start_e_col + l_cut])
+
+        start_e_row += l_cut
+        start_e_col += l_cut
+        temp_C0 = C0[start_c_row:start_c_row+th_cut, :]
+        (r, c) = temp_C0.shape
+        CO_above = sparse.csr_matrix((start_c_row, c))
+        CO_below = sparse.csr_matrix((c - r - start_c_row, c))
+        CO_all = sparse.vstack([CO_above, temp_C0, CO_below, ])
+        Cs.append(CO_all)
+
+        temp_g = g0[start_c_row:start_c_row+th_cut]
+        g0_above = sparse.csr_matrix((start_c_row, 1))
+        g0_below = sparse.csr_matrix((c - r - start_c_row, 1))
+        g0_all = sparse.vstack(
+            [g0_above, sparse.csc_matrix(temp_g), g0_below, ])
+        gs.append(g0_all)
+
+        start_c_row += th_cut
+
+    temp_C0 = C0[start_c_row:, :]
+    (r, c) = temp_C0.shape
+    CO_above = sparse.csr_matrix((start_c_row, c))
+    CO_below = sparse.csr_matrix((c - r - start_c_row, c))
+    CO_all = sparse.vstack([CO_above, temp_C0, CO_below])
+    Cs.append(CO_all)
+
+    temp_g = g0[start_c_row:]
+    g0_above = sparse.csr_matrix((start_c_row, 1))
+    g0_below = sparse.csr_matrix((c - r - start_c_row, 1))
+    g0_all = sparse.vstack([g0_above, sparse.csc_matrix(temp_g), g0_below, ])
+    gs.append(g0_all)
+
+    l_cut_p = len(inds['deltaLambdaP'])
+    Bs.append(B0[start_b:start_b + l_cut_p, start_b:start_b + l_cut_p])
+    us.append(f0[start_b:start_b + l_cut_p])
+
+    Fs.append(F0[start_f_row:start_f_row + l_cut, :])
+    fs.append(f0[start_f_row:start_f_row + l_cut])
+    Es.append(E0[:, start_e_col:])
+    to_send = [(B, F, E, C, f, g, u)
+               for (B, F, E, C, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
+
+    As = []
+    for i in range(0, len(Fs)):
+        b = Bs[i]
+        e = Es[i]
+        f = fs[i]
+        g = gs[i]
+        temp_res = g - e * sparse.diags(1/b.diagonal()) * f
+        As.append(temp_res)
+    return(to_send, As)
+
+def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None):
+    
+    newA= combined[0][0].copy()
+    newG = combined[0][1].copy()
+    for i in range(1, len(combined)):
+        newA += combined[i][0]
+        newG += combined[i][1]
+    otherInfo = [(x[3], x[4], x[5]) for x in combined]
+    #print("Going local route... with %d" % iproc)
+
+    cut = nrows[1]
+    B0 = newA[:cut, :cut]
+    F0 = newA[:cut, cut:]
+    E0 = newA[cut:, :cut]
+    C0 = newA[cut:, cut:]
+
+    # same for f0. f0 is the stuff that can be computed independently,
+    # g0 is the stuff that can't be
+    f0 = newG[:cut]
+    g0 = newG[cut:]
+
+    #print("Finished split8ing with %d %s" % (iproc, str(B0.shape)))
+    # Direct Solve via ILU
+    
+    ILU = sparse.linalg.spilu(B0 + 1e-4 * sparse.eye(B0.shape[0]))
+    (L1, U1) = (ILU.L, ILU.U)
+    #logging.info("Finishing ILU")
+    
+    G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
+    W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
+    A2 = C0 - G1.T * W1
+    #logging.info("Fininsihed A2")
+    
+    # Backsolve
+    f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
+    f1_prime = f1_prime.reshape(len(f1_prime), 1)
+    inner = G1.T * f1_prime
+    g1_prime = g0 - inner
+    #logging.info("Finishing g1_prime")
+    # More backsolve
+    y1 = spsolve(A2, g1_prime)
+    #logging.info("Finishing direct solve")
+    y1 = y1.reshape(len(y1), 1)
+    u1 = sparse.linalg.spsolve_triangular(
+    U1, (f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
+    #logging.info("Finished backsub")
+    u1 = u1.reshape(len(u1), 1)
+    y1 = np.concatenate((u1, y1))
+    #logging.info("Starting GMRES")
+    #y1 = sparse.linalg.gmres(newA, newG)[0]
+    #logging.info("Ending GMRES")
+    #y1 = y1.reshape(len(y1), 1)
+    B = sparse.block_diag([combined[i][3] for i in range(0, len(combined)) ])
+    F = sparse.vstack([combined[i][4] for i in range(0, len(combined)) ])
+    f = np.vstack([combined[i][5] for i in range(0, len(combined)) ])
+    #logging.info("Finsihed constructing")
+    u0 = sparse.linalg.spsolve_triangular(B, f  - F * y1 , False )
+    #logging.info("Finsihing backsolve")
+    u0 = u0.reshape(len(u0), 1)
+    y0 = np.concatenate((u0, y1))
+    res = repermute(y0, inds[1])
+
+    return res
+
+def local_schurs(inputs):
+    (B, F, E, C, f, g, u) = inputs
+    A1_local = C - E * sparse.diags(1/B.diagonal()) * F
+    g1_local = g - E * sparse.diags(1/B.diagonal()) * f
+
+    return((A1_local, g1_local, u, B, F, f))

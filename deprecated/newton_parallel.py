@@ -1000,7 +1000,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
     #iproc = 0
     splits = None
     if(iproc == 0):
-        #print("Handling splits")
+        print("Handling splits")
         model_data = sio.loadmat(model_fname)
         y0_data = sio.loadmat(y0_fname)
         constr_data = sio.loadmat(constr_fname)
@@ -1008,7 +1008,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         model = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
-        (inds, nrows) = find_reordering(model_data['model'], method = "standard" )
+        (inds, nrows) = find_reordering(model_data['model'], method = "grouped" )
         M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
         rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
