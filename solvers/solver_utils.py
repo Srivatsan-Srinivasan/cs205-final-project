@@ -1,0 +1,412 @@
+'''
+SOLVER SPECIFIC FUNCTIONS
+
+Solver Specific Utils for Newton Step Solvers in Security Constrained Optimal Power Flow
+
+CS205 Spring 2019, Final Project
+Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
+'''
+
+import numpy as np
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
+
+def make_mapping(d):
+    '''
+    Given a model - like data structure, constructs the equivalent mapping dict.
+    
+    Args:
+        d (any model - like): model - like data structure to be converted
+
+    Returns:
+        mapping (dict): dictionary definiting the equivalent mapping
+    '''
+
+    key = d.dtype.fields.keys()
+    val = np.arange(len(key))
+
+    mapping = {k:v for k, v in zip(key, val)}
+    return mapping
+
+def get_model_specific(model_data, constr_num):    
+    '''
+    Given a loaded model data file matrix, returns the constraints specific model information.
+    
+    Args:
+        model_data (scipy.sparse or numpy matrices): model_data
+        constr_num (int): index for the constraint of interest
+
+    Returns:
+        constr_info (scipy.sparse or numpy matrices): constraint specific model information
+    '''
+
+
+    '''Get the constraint specific model information'''
+    return model_data[0][0][1][0][constr_num]
+
+def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
+    '''
+    Given the model, Y0 variables (per paper), constraint data file matrix, constructs
+    the newton block diagonal matrix per paper.
+
+    Args:
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        constr_data (scipy.sparse or numpy matrices): constraint data file matrix
+
+    Returns:
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
+    '''
+
+    dim_y0_mapping = make_mapping(y0_data[0])
+    theta = y0_data[0][0][dim_y0_mapping['th']][0][0]
+
+    Ms = []
+    Bu = []
+    #total specific cons to consider
+    total_cons = len(model_data[0][0][1][0])
+    #construct M and B for each contingency
+    for con_num in range(total_cons):
+        model_specific = get_model_specific(model_data, con_num)
+        info_mapping = make_mapping(model_specific)
+        dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
+        nieq = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['nineq']][0][0]
+
+        A2 = model_specific[0][0][8]
+        D2 = model_specific[0][0][9]
+        B = model_specific[0][0][5]
+        m = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['m']][0][0]
+
+        constr_mapping = make_mapping(constr_data[0])
+
+        gval = np.zeros((nieq, 1))
+        gval[:m] = D2.dot(A2).dot(theta) - constr_data[0][0][constr_mapping['uf']][0][con_num]
+        gval[m:2*m] = -D2.dot(A2).dot(theta) + \
+            constr_data[0][0][constr_mapping['lf']][0][con_num]
+        gval = gval.flatten()
+
+        Dg = np.concatenate((D2.dot(A2), -D2.dot(A2)))
+        Ax = B
+
+        dim_th = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['th']][0][0]
+        dim_n = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['n']][0][0]
+
+        ab = (y0_data[0][0][dim_y0_mapping['lam']][0][con_num]).flatten()
+        LM = -1 * np.diag(ab)
+        LM = LM.dot(Dg)
+
+        r1 = [np.zeros((dim_th, dim_th)),          Dg.T,                       Ax.T]
+        r2 = [LM,                        -np.diag(gval),    np.zeros((nieq, dim_n))]
+        r3 = [Ax,               np.zeros((dim_n, nieq)),   np.zeros((dim_n, dim_n))]
+
+        Ms.append(sparse.csr_matrix(np.block([r1, r2, r3])))
+
+        Au = -1 * np.eye(dim_n)
+        lam_u_s = np.size(y0_data[0][0][dim_y0_mapping['lam_u']])
+        r1 = [np.zeros((dim_th, dim_n)), np.zeros((dim_th, lam_u_s))]
+        r2 = [np.zeros((nieq, dim_n)),   np.zeros((nieq, lam_u_s))]
+        r3 = [Au,                        np.zeros((dim_n, lam_u_s))]
+        Bu.append(sparse.csr_matrix(np.block([r1, r2, r3])))
+
+    #constructing the general matrix - need to know the variables
+    g_u = np.zeros((lam_u_s, 1))
+
+    general_mapping = make_mapping(model_data[0][0][0][0][0])
+    dims_general = model_data[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)
+    
+    n = dims_general[0][0][dims_general_mapping['p']][0][0]
+    p = y0_data[0][0][dim_y0_mapping['p']]
+    g_u[:n] = p - constr_data[0][0][constr_mapping['up']]
+    g_u[n:2*n] = -p + constr_data[0][0][constr_mapping['lp']]
+
+    Dg_u = np.concatenate((np.eye(n), -np.eye(n)))
+    pars_general = model_data[0][0][0][0][0][general_mapping['par']]
+    pars_mapping = make_mapping(pars_general)
+    par_W = pars_general[0][0][pars_mapping['W']]
+
+    temp = np.diag(y0_data[0][0][dim_y0_mapping['lam_u']].flatten())
+    r1 = [2*par_W, Dg_u.T]
+    r2 = [-temp.dot(Dg_u), -1 * np.diag(g_u.flatten())]
+    Du = np.block([r1, r2])
+
+    BB_nrows = dims_general[0][0][dims_general_mapping['BB_nrows']][0][0]
+    BB_ncols = dims_general[0][0][dims_general_mapping['BB_ncols']][0][0]
+    BB = np.zeros((BB_nrows, BB_ncols))
+
+    #shift to track update locations in block matrices
+    shift = 0
+    for con_num in range(total_cons):
+        model_specific_i = get_model_specific(model_data, con_num)
+        specific_mapping = make_mapping(model_specific_i)
+        dims = model_specific_i[0][0][specific_mapping['dim']]
+        dims_mapping = make_mapping(dims)
+        BB_nrows = dims[0][0][dims_mapping['BB_nrows']][0][0]
+        BB[shift:BB_nrows + shift, :] = Bu[con_num].toarray()
+        shift += BB_nrows
+
+    if total_cons == 0:
+        AA = Ms[0]
+    else:
+        AA = sparse.block_diag(Ms)
+
+    #combine it all together!
+    #AA: Combination of all the Ms
+    #Du: Primary/dual variables related to the initial physical constructions
+    #BB: All the stuff in between
+
+    newton_matrix = sparse.bmat([
+        [AA, sparse.csc_matrix(BB)], 
+        [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
+
+    return(newton_matrix)
+
+def get_specific_dim(model_data, cons_num):    
+    model_specific = get_model_specific(model_data, cons_num)
+    info_mapping= make_mapping(model_specific)
+    dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
+    dims = model_specific[0][0][info_mapping['dim']][0][0]
+    return((dims, dim_mapping))
+
+def permute_NewtonBDMatrix(model_data, method = "standard"):
+    '''The algorithm here is to permute to get the same type of variables together. 
+    Roughtly speaking instead of grouping by contingency directly we want to group by 
+    theta variables, lambda variables etc. This somehow gives us a very diagonal 
+    B0 matrix which is really easy to work with. 
+    '''
+    if(method not in ['standard', 'grouped']):
+        raise ValueError("Invalid method supplied")
+    # method types: 
+    # standard (group lambdas together and then group (nu/theta))
+    # grouped (group all lambdas together than all nu and then all theta)
+    ncont = len(model_data[0][0][1][0]) - 1
+    inds = {'deltaTheta': [], 'deltaLambda': [], 'deltaNu': [],
+            'rDual': [], 'rCent': [], 'rPri': []}
+
+    shift = 0
+    shift2 = 0
+    for cons_num in range(0, ncont + 1):
+        model_specific = get_model_specific(model_data, cons_num)
+        info_mapping = make_mapping(model_specific)
+        dim_mapping = make_mapping(
+            model_specific[0][0][info_mapping['dim']][0])
+        dims = model_specific[0][0][info_mapping['dim']][0][0]
+
+        dim_th = dims[dim_mapping['th']][0][0]
+        dim_lam = dims[dim_mapping['lam']][0][0]
+        dim_neq = dims[dim_mapping['neq']][0][0]
+
+        inds['deltaTheta'].append(np.arange(shift, dim_th + shift))
+        shift = shift + dim_th
+        inds['deltaLambda'].append(np.arange(shift, dim_lam + shift))
+        shift = shift + dim_lam
+        inds['deltaNu'].append(np.arange(shift, dim_neq + shift))
+        shift += dim_neq
+
+        inds['rDual'].append(np.arange(shift2, dim_th + shift2))
+        shift2 += dim_th
+        inds['rCent'].append(np.arange(shift2, dim_lam + shift2))
+        shift2 += dim_lam
+        inds['rPri'].append(np.arange(shift2, dim_neq + shift2))
+        shift2 += dim_neq
+
+    general_mapping = make_mapping(model_data[0][0][0][0][0])
+    dims_general = model_data[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)
+    p = dims_general[0][0][dims_general_mapping['p']][0][0]
+    inds['deltaP'] = np.arange(shift, p+shift)
+    shift += p
+    inds['deltaLambdaP'] = np.arange(shift, shift + 2*p)
+    shift += 2 * p
+    inds['rdualP'] = np.arange(shift2, shift2 + p)
+    shift2 += p
+    inds['rcentP'] = np.arange(shift2, shift2 + 2*p)
+    shift2 += 2 * p
+
+    new_column_inds = np.zeros(shift, dtype='int')
+    shift = 0
+    for k in range(0, ncont + 1):
+        (dims, dim_mapping) = get_specific_dim(model_data, k)
+        dim_lam = dims[dim_mapping['lam']][0][0]
+        new_column_inds[shift:shift + dim_lam] = inds['deltaLambda'][k]
+        shift += dim_lam
+
+    new_column_inds[shift: 2 * p + shift] = inds['deltaLambdaP']
+    shift += 2 * p
+    B0_nrows = shift  # all the lambda changes
+
+    for k in range(0, ncont + 1):
+        (dims, dim_mapping) = get_specific_dim(model_data, k)
+        dim_th = dims[dim_mapping['th']][0][0]
+        new_column_inds[shift:dim_th + shift] = inds['deltaTheta'][k]
+        shift += dim_th
+
+        if(method == 'grouped'):
+            dim_neq = dims[dim_mapping['neq']][0][0]
+            new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
+            shift += dim_neq
+        
+       
+    if(method == "standard"):
+        for k in range(0, ncont + 1):
+            (dims, dim_mapping) = get_specific_dim(model_data, k)
+            dim_neq = dims[dim_mapping['neq']][0][0]          
+            new_column_inds[shift:dim_neq+shift] = inds['deltaNu'][k]
+            shift += dim_neq
+       
+    new_column_inds[shift:p+shift] = inds['deltaP']
+    shift += p
+
+    new_rows_inds = np.zeros(shift2, dtype='int')
+
+    shift2 = 0
+    for k in range(0, ncont + 1):
+        (dims, dim_mapping) = get_specific_dim(model_data, k)
+        dim_lam = dims[dim_mapping['lam']][0][0]
+        new_rows_inds[shift2:dim_lam + shift2] = inds['rCent'][k]
+        shift2 += dim_lam
+
+    new_rows_inds[shift2:2*p + shift2] = inds['rcentP']
+    shift2 += 2 * p
+    for k in range(0, ncont + 1):
+        (dims, dim_mapping) = get_specific_dim(model_data, k)
+        dim_th = dims[dim_mapping['th']][0][0]
+        new_rows_inds[shift2:dim_th + shift2] = inds['rDual'][k]
+        shift2 += dim_th
+
+        if(method == "grouped"):
+            dim_neq = dims[dim_mapping['neq']][0][0]
+            new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
+            shift2 += dim_neq
+
+    new_rows_inds[shift2:p + shift2] = inds['rdualP']
+    shift2 += p
+    if(method == 'standard'):
+        for k in range(0, ncont + 1):
+            (dims, dim_mapping) = get_specific_dim(model_data, k)
+            dim_neq= dims[dim_mapping['neq']][0][0]
+            new_rows_inds[shift2:dim_neq + shift2] = inds['rPri'][k]
+            shift2 += dim_neq
+
+    return [new_rows_inds, new_column_inds, inds], [B0_nrows, dims_general[0][0][dims_general_mapping['th']][0][0]]
+
+def permute_sparse_matrix(M, orderRow, orderCol):    
+    ''' 
+    Permutes a sparse matrix given a custom ordering of the row and column indices.
+    Taken from https://gist.github.com/vtraag/8b82e10e57d93eacc524
+
+    Args:
+        M (scipy.sparse matrices): scipy sparse matrice to permute
+        orderRow (list of ints): custom ordering of row indices
+        orderCol (list of ints): custom ordering of column indices
+
+    Returns:
+        M_permuted (scipy.sparse matrices): permuted scipy sparce matrice
+    '''
+
+    M_permuted = M.tocsr()
+    M_permuted = M_permuted[:, orderCol]
+    M_permuted = M_permuted[orderRow, :]
+    return M_permuted    
+
+def repermute(y0, new_col_inds):    
+    ''' 
+    Permutes a sparse matrix given a custom ordering of the row and column indices.
+    Taken from https://gist.github.com/vtraag/8b82e10e57d93eacc524
+
+    Args:
+        M (scipy.sparse matrices): scipy sparse matrice to permute
+        orderRow (list of ints): custom ordering of row indices
+        orderCol (list of ints): custom ordering of column indices
+
+    Returns:
+        M_permuted (scipy.sparse matrices): permuted scipy sparce matrice
+    '''
+    y0_reorder = np.zeros_like(y0)
+    for i in range(0, len(y0)):
+        itemindex = np.where(new_col_inds == i)[0]
+        y0_reorder[i] = y0[itemindex]
+    return(y0_reorder)
+
+def multigrid(A, rhs, current_level, terminal_level,
+              pMethod = 'identity', nMethod = 'given', pInput = None, nInput = None ):
+      
+    if(pMethod == 'given'):
+        if(len(pInput) != terminal_level - current_level):
+            raise ValueError("Needs to be consistent")
+        else:        
+            A = permute_sparse_matrix(A, pInput[0][0], pInput[0][1])            
+            rhs = rhs[pInput[0][0]]
+            pMethod = 'identity'
+        
+        
+    if(nMethod == 'given'):
+        if(len(nInput) != terminal_level - current_level + 1):
+            raise ValueError("Needs to be consistent")
+        else:
+            nrows = nInput[0]
+            if(terminal_level != current_level):
+                nInput = nInput[1:]
+    
+    # Split input matrix based on nrows    
+    A = A.tocsr()
+    B0 = A[:nrows, :nrows]
+    F0 = A[:nrows, nrows:]
+    E0 = A[nrows:, :nrows]
+    C0 = A[nrows:, nrows:]
+    
+    # Same for f0. f0 is the stuff that can be computed independently, 
+    # g0 is the stuff that can't be
+    f0 = rhs[:nrows]
+    g0 = rhs[nrows:]
+    
+    # On this level, set L0 = I, and U0 = B 
+    if(current_level == terminal_level):
+        # Direct Solve via ILU        
+        ILU = sparse.linalg.spilu(B0 + 1e-4 * sparse.eye(B0.shape[0]))
+        (L1, U1) = (ILU.L, ILU.U)
+        G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
+        W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
+        A2 = C0 - G1.T * W1 
+        
+        # Backsolve 
+        f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
+        f1_prime = f1_prime.reshape(len(f1_prime), 1)
+        inner = G1.T * f1_prime
+        g1_prime = g0 - inner
+        
+        #More backsolve
+        y1 = spsolve(A2, g1_prime)
+        y1 = y1.reshape(len(y1), 1)
+        u1 = sparse.linalg.spsolve_triangular(U1,(f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
+        u1 = u1.reshape(len(u1), 1)
+        y0 = np.concatenate((u1,y1))
+        #Stick them together
+        return y0
+    else:
+        # Descent donwards        
+        L0 = sparse.eye(B0.shape[0])
+        U0 = B0
+        #Since B0 is diagonal can do this
+        inv_U0 = sparse.diags(1/B0.diagonal())
+        
+        # Use Schur's complement
+        inv_L0 = L0
+        G0 = E0 * inv_U0;
+        W0 = inv_L0 * F0;
+        A1 = C0 - G0 * W0;
+    
+        # Forward/backwards substiution 
+        f0_prime = sparse.linalg.spsolve_triangular(L0,f0);
+        f0_prime = f0_prime.reshape(len(f0_prime), 1)
+        g0_prime = g0 - G0 * f0_prime;
+
+        y0 = multigrid(A1, g0_prime, current_level + 1, terminal_level, 'identity', 'given', pInput, nInput)
+        u0 = sparse.linalg.spsolve_triangular(U0,(f0_prime - W0 * y0), False)
+        u0 = u0.reshape(len(u0), 1)
+        y0 = np.concatenate((u0,y0))
+        
+        
+        if(pInput != None):
+            y0 = repermute(y0, pInput[0][1])
+        return y0
