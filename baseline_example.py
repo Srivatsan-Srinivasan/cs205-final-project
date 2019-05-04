@@ -1,13 +1,18 @@
 import logging
 from solvers import solver_baseline
 
-logging.basicConfig(format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
+def run_baseline_example():
 
-logging.info('RUNNING SERIAL UNOPTIMIZED SOLVER')
+	logging.basicConfig(format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 
-#run some sample from the dataset
-sample_bus_count = 189
-sample_constr_count = 5
+	logging.info('RUNNING SERIAL UNOPTIMIZED SOLVER')
 
-#solve the system
-solver_baseline.solve(sample_bus_count, sample_constr_count)
+	#run some sample from the dataset
+	sample_bus_count = 189
+	sample_constr_count = 5
+
+	#solve the system
+	solver_baseline.solve(sample_bus_count, sample_constr_count)
+
+if __name__ == '__main__':
+	run_baseline_example()
