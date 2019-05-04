@@ -32,6 +32,8 @@ $ pip install pycallgraph
 
 ## Run
 
+### INSTRUCTED DEPRECATED SEE BELOW FOR SHORT SUMMARY OF NEW
+
 ##### simple parallel example 2224 bus, 2 constraints (4 node)
 $ srun -p test --pty -n 1 -N 4 -t 0-01:00 --mem-per-cpu=4000 /bin/bash
 $ module load Anaconda3/5.0.1-fasrc02
@@ -59,3 +61,15 @@ srun -p test --pty --ntasks=8 --ntasks-per-node=1 --cpus-per-task=1 -t 0-01:00 -
 
 
 --ntasks=8 --ntasks-per-node=1 --cpus-per-task=4
+
+
+
+### NEW runners
+
+#### to run solver
+python baseline_example.py
+python serial_multilevel_example.py
+
+#### to profiler solver
+python profile_baseline_example.py
+python profile_serial_multilevel_example.py
