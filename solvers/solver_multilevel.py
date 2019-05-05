@@ -121,8 +121,9 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
     else:
         logging.info("solving bottom level in single node")        
-        if iproc == 0:
-            soln = multigrid_full_parallel(iproc, combined, inds, nrows, model_data)    
+        #if iproc == 0:
+        soln = multigrid_full_parallel(iproc, combined, inds, nrows, model_data)    
+        if(iproc == 0):
             logging.info('finished solving system.')    
             return soln
         else:
@@ -137,6 +138,9 @@ def solve(bus_count, constr_count, save=False, fullParallel = False):
     inode = MPI.Get_processor_name()
 
     splits = None
+    inds = None
+    nrows = None
+    model_data = None
     if iproc == 0:
         #master node
         model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)

@@ -10,6 +10,7 @@ Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
+from mpi4py import MPI
 
 def make_mapping(d):
     '''
@@ -567,8 +568,8 @@ def local_schurs(inputs):
     
     
 def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=None, res=None):
-    ncont = get_num_cont(model)
     if(iproc == 0):
+        ncont = get_num_cont(model)
         newA= combined[0][0].copy()
         newG = combined[0][1].copy()
         for i in range(1, len(combined)):
@@ -577,30 +578,34 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
         otherInfo = [(x[3], x[4], x[5]) for x in combined]
         split_solve = distributed_data_calc(model, newA, newG, ncont, otherInfo, moveZero = True)
     
-        local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
-        (B, F, f) = local_inputs[-1]
+    local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
+    (B, F, f) = local_inputs[-1]
      #   print("Local input %d has %s" % (iproc, str(local_inputs)))
   #      print(local_inputs)
-        inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
+    inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
                              local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
                              tol = 1e-6)
   #      logging.info("I am proc %d and I've finishing my processing my results are %s" % (iproc, str(inner_soln)))    
        
         
-        combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
-        if(iproc == 0):
-            combined2 = combined2[1:] + [combined2[0]]
-            us =  [u[0] for u in combined2]
-            ys = [y[1] for y in combined2]
-            us = np.concatenate(us)
-            ys = np.concatenate(ys)
-            res = np.concatenate((us, ys))
-            res = repermute(res, inds[1])
+    combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
+    if(iproc == 0):
+        combined2 = combined2[1:] + [combined2[0]]
+        us =  [u[0] for u in combined2]
+        ys = [y[1] for y in combined2]
+        us = np.concatenate(us)
+        ys = np.concatenate(ys)
+        res = np.concatenate((us, ys))
+        res = repermute(res, inds[1])
+        return(res)
 
 def split_to_distributed(model, Ar, rhsr, num_cont):
     '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
     Ar2 = Ar
-    (cols, rows, inds) = permute_NewtonBDMatrix(model)
+    (data, _ ) = permute_NewtonBDMatrix(model)
+    #(data, _) = permute_newtonBDMatrix(model)
+    (rows, cols, inds) = data
+    #(cols, rows, inds) = permute_NewtonBDMatrix(model)
 #    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
 #    rhsr = rhsr[np.concatenate(cols)]
 
