@@ -193,6 +193,7 @@ def run_sample3(model_fname, rhs_fname, y0_fname, constr_fname):
     return(mlSolve)
 
 
+
 def get_names(b, n, directory):
     end_name = "%d_nbus%d_ncont" % (b, n)
     model_fname = os.path.join(directory, "model_%s" % end_name)
@@ -678,7 +679,18 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
     print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
 	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
-    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F * combined_local, False)
+   
+    iproc = MPI.COMM_WORLD.Get_rank()
+
+    if(iproc == 0):
+        left_bound = - len(yli)
+        right_bound = len(f)
+    else:
+        left_bound = (iproc - 1) * len(total_local)
+        right_bound = (iproc) * len(total_local)
+
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
+ #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
     u10 = ul0.reshape(len(ul0), 1)
     return((u10, combined_local))
 
