@@ -656,7 +656,7 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
             [Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu]])
     #Hps_outer.append(Hps_inner)
     Hps_outer.insert(0, Hps_inner)
-    print("Len is %d" % len(Hps_outer[0]))
+   # print("Len is %d" % len(Hps_outer[0]))
     return(to_split_arr, rhs_split_arr, Hps_outer)
 
 
@@ -682,8 +682,8 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     #(B, F, f) = otherData
     
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
-    print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
-	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
+  #  print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
+#	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
    
 #    iproc = MPI.COMM_WORLD.Get_rank()
 
@@ -693,12 +693,12 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     else:
         left_bound = (iproc - 1) *len(combined_local)
         right_bound = (iproc) * len(combined_local)
-    print("Left bound is %d and right is %d" % (left_bound, right_bound))
+ #   print("Left bound is %d and right is %d" % (left_bound, right_bound))
     ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
     #print("U10 shape is %s" % str(u10))
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
     u10 = ul0.reshape(len(ul0), 1)
-    print("u10 shape is %s" %  str(u10.shape))
+  #  print("u10 shape is %s" %  str(u10.shape))
     return((u10, combined_local))
 
 
@@ -739,8 +739,8 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             interface_y = communicate_interface(iproc, nproc, yguess)
             #Do the dot product
             adjust_left = interface_dotProd(interface_y, Hips)
-            print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
-            print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
+         #   print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
+          #  print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
 	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
         if(useSchurs):
             Pr = r[len(fi):]
@@ -794,24 +794,24 @@ def communicate_interface(iproc, nproc, toSend, useMPI = True):
     if(iproc == 0):
         from_other_to_root = None
     cont_to_power_injection = MPI.COMM_WORLD.gather(from_other_to_root, root = 0)
-    print("For %d I have cont for cont power %s" % (iproc, str(cont_to_power_injection)))
+    #print("For %d I have cont for cont power %s" % (iproc, str(cont_to_power_injection)))
     toBcast = None
     if(iproc == 0):
         toBcast = [toSend]
     power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = 0)
-    print("For %d I have power %s" %(iproc, str(power_injection_to_cont)))
+   # print("For %d I have power %s" %(iproc, str(power_injection_to_cont)))
     interface_y = None
     if(iproc == 0):
         interface_y = [x for x in cont_to_power_injection if x is not None]
     else:
         interface_y = power_injection_to_cont
-    print("For %d i have interface beign %s" % (iproc, str(interface_y)))
+    #print("For %d i have interface beign %s" % (iproc, str(interface_y)))
     return(interface_y)
     
 def interface_dotProd(interface_y, Hips):
     adjust_left = 0
     for index in range(0, len(Hips)):
-        print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
+     #   print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
         temp = Hips[index] * interface_y[index]
 	#print('hi')	
         adjust_left += temp
