@@ -490,7 +490,10 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     
     check1 = Ar2[:, start_c:]
     check2 = Ar2[start_r:, :]
-    assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
+    
+    diff = sparse.linalg.norm(check1 - check2.T)
+    print("Diff is %f\n" % diff)
+    #assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
     #to_split_arr.append(Cp)
@@ -521,7 +524,7 @@ def distrubted_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
     if(otherData is not None):
         if(moveZero == True):
-            otherData = otherData.insert(0, otherData.pop())
+            otherData.insert(0, otherData.pop())
         grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
     else:
         grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
@@ -669,13 +672,15 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
+    combined_local = np.concatenate(local_soln)
     #(B, F, f) = otherData
     
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
-
-    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F * local_soln, False)
+    print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
+	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F * combined_local, False)
     u10 = ul0.reshape(len(ul0), 1)
-    return((u10, local_soln))
+    return((u10, combined_local))
 
 
 def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
@@ -759,7 +764,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             combined = gi
     #    combined = np.concatenate((fi, gi.flatten()))
         combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
-    return(combined_soln)
+    return(combined_soln[:len(fi)], combined_soln[len(fi):])
         
 #gmres_solver_wrapper(newA, np.zeros((0, 1)), newG, [], True)
     
@@ -992,7 +997,7 @@ def revert_ordering(ordering):
 
 
 def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True, 
-                    useMPI_2 = False):
+                    useMPI_2 = False, method = "standard"):
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
     inode = MPI.Get_processor_name()
@@ -1008,7 +1013,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         model = model_data['model']
         M_n = create_M_newton(model_data, y0_data, constr_data)
         M_n = M_n.tocsc()
-        (inds, nrows) = find_reordering(model_data['model'], method = "standard" )
+        (inds, nrows) = find_reordering(model_data['model'], method = method )
         M_n = permute_sparse_matrix(M_n, inds[0], inds[1])
         rhs = rhs[inds[0]]
         ncont = len(model[0][0][1][0]) - 1
@@ -1148,10 +1153,10 @@ for i in range(0, len(split_solve)):
 '''
 
 
-def run_run_sample4():
-    (mname, rhsname, yname, cname) = get_names(2224, 6, "Data")
+def run_run_sample4(method = "standard"):
+    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
     print("Running a simple test")
-    res = run_sample4(mname, rhsname, yname, cname)
+    res = run_sample4(mname, rhsname, yname, cname, useMPI_2 = True, method = method)
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
     print(res)
 
@@ -1193,7 +1198,7 @@ if __name__ == '__main__':
 
    #ABCD = run_sample2('standard')
 
-    run_run_sample4()
+    run_run_sample4(method="grouped")
 #
 # if __name__ == __main__:
 #    nproc = MPI.COMM_WORLD.Get_size()
