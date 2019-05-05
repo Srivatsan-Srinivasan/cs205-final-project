@@ -599,12 +599,21 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
         res = repermute(res, inds[1])
         return(res)
 
+
+def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
+    (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
+    if(otherData is not None):
+        if(moveZero == True):
+            otherData = otherData.insert(0, otherData.pop())
+        grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
+    else:
+        grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
+    return(grouped)
+
 def split_to_distributed(model, Ar, rhsr, num_cont):
     '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
     Ar2 = Ar
-    (data, _ ) = permute_NewtonBDMatrix(model)
-    #(data, _) = permute_newtonBDMatrix(model)
-    (rows, cols, inds) = data
+    (cols, rows, inds) = find_regrouping(model)
     #(cols, rows, inds) = permute_NewtonBDMatrix(model)
 #    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
 #    rhsr = rhsr[np.concatenate(cols)]
@@ -674,15 +683,6 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     return((u10, local_soln))
 
 
-def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
-    (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
-    if(otherData is not None):
-        if(moveZero == True):
-            otherData = otherData.insert(0, otherData.pop())
-        grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
-    else:
-        grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
-    return(grouped)
 
 
 def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
@@ -799,3 +799,64 @@ def interface_dotProd(interface_y, Hips):
     return(adjust_left)
 
 
+def find_regrouping(model):
+    '''For the last level after eliminating lambda, now group so that 
+    the thetas/nus are grouped based on contigency number. This is similar 
+    to the other ordering function and should find a way to refactor'''
+
+    # TODO: Mixed up the row and col here :(
+    ncont = len(model[0][0][1][0]) - 1
+    inds = {'deltaTheta': [], 'deltaNu': [],
+            'rDual': [],  'rPri': []}
+
+    shift = 0
+    shift2 = 0
+    for cons_num in range(0, ncont + 1):
+        model_specific = get_model_specific(model, cons_num)
+        info_mapping = make_mapping(model_specific)
+        dim_mapping = make_mapping(
+            model_specific[0][0][info_mapping['dim']][0])
+        dims = model_specific[0][0][info_mapping['dim']][0][0]
+
+        dim_th = dims[dim_mapping['th']][0][0]
+        dim_neq = dims[dim_mapping['neq']][0][0]
+
+        inds['deltaTheta'].append(np.arange(shift, dim_th + shift))
+        shift = shift + dim_th
+        inds['rDual'].append(np.arange(shift2, dim_th + shift2))
+        shift2 += dim_th
+
+    general_mapping = make_mapping(model[0][0][0][0][0])
+    dims_general = model[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)
+    p = dims_general[0][0][dims_general_mapping['p']][0][0]
+    inds['deltaP'] = np.arange(shift, p+shift)
+    shift += p
+
+    for cons_num in range(0, ncont + 1):
+        model_specific = get_model_specific(model, cons_num)
+        info_mapping = make_mapping(model_specific)
+        dim_mapping = make_mapping(
+            model_specific[0][0][info_mapping['dim']][0])
+        dims = model_specific[0][0][info_mapping['dim']][0][0]
+
+        dim_th = dims[dim_mapping['th']][0][0]
+        dim_neq = dims[dim_mapping['neq']][0][0]
+
+        inds['deltaNu'].append(np.arange(shift, dim_neq + shift))
+        shift += dim_neq
+
+        inds['rPri'].append(np.arange(shift2, dim_neq + shift2))
+        shift2 += dim_neq
+
+    inds['rdualP'] = np.arange(shift2, shift2 + p)
+    shift2 += p
+
+    inds_info_col = [np.concatenate((x1, y1)) for x1, y1 in zip(
+        inds['deltaTheta'], inds['deltaNu'])]
+    inds_info_col.append(inds['deltaP'])
+    inds_info_row = [np.concatenate((x1, y1))
+                     for x1, y1 in zip(inds['rDual'], inds['rPri'])]
+    inds_info_row.append(inds['rdualP'])
+
+    return(inds_info_col, inds_info_row, inds)
