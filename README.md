@@ -13,6 +13,7 @@ This repository will be used to commit code necessary for the final project of C
 
 * Overleaf link for the design presentation : https://www.overleaf.com/4973698375xwjqbstbnfxp
 
+![alt text](https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/imgs/profile_example.png)
 
 # Compute Environment
 
@@ -61,8 +62,6 @@ srun -p test --pty --ntasks=8 --ntasks-per-node=1 --cpus-per-task=1 -t 0-01:00 -
 
 
 --ntasks=8 --ntasks-per-node=1 --cpus-per-task=4
-
-
 
 ### NEW runners
 
