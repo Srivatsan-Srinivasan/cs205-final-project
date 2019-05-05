@@ -599,7 +599,6 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
         res = repermute(res, inds[1])
         return(res)
 
-
 def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
     if(otherData is not None):
@@ -674,7 +673,7 @@ def get_S(L, U, num=33):
     return(L[num:, num:], U[num:, num:])
 
 
-def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
+def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
     
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
@@ -686,7 +685,7 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
     print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
 	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
    
-    iproc = MPI.COMM_WORLD.Get_rank()
+#    iproc = MPI.COMM_WORLD.Get_rank()
 
     if(iproc == 0):
         left_bound = - len(yli)
