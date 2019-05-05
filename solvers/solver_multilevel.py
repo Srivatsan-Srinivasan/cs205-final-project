@@ -68,7 +68,7 @@ def _construct_newton(model_data, rhs_data, y0_data, constr_data):
 
     newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
 
-    inds, nrows = permute_NewtonBDMatrix(model_data, 'grouped')    
+    inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
 
     newton_matrix = permute_sparse_matrix(newton_matrix, inds[0], inds[1])    
     rhs_data = rhs_data[inds[0]]
