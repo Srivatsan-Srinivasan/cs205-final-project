@@ -553,6 +553,15 @@ def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None)
 
     return res
 
+def multigrid_full_parallel(iproc, combined, inds, nrows, split_solve=None, res=None):
+    newA= combined[0][0].copy()
+    newG = combined[0][1].copy()
+    for i in range(1, len(combined)):
+        newA += combined[i][0]
+        newG += combined[i][1]
+    otherInfo = [(x[3], x[4], x[5]) for x in combined]
+
+    
 def local_schurs(inputs):
     (B, F, E, C, f, g, u) = inputs
     A1_local = C - E * sparse.diags(1/B.diagonal()) * F
