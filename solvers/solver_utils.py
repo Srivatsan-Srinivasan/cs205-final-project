@@ -604,7 +604,7 @@ def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= T
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
     if(otherData is not None):
         if(moveZero == True):
-            otherData = otherData.insert(0, otherData.pop())
+            otherData.insert(0, otherData.pop())
         grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
     else:
         grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
