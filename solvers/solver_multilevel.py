@@ -94,7 +94,7 @@ def _descend_level(iproc, splits):
 
     return combined
 
-def _solver(iproc, combined, inds, nrows):
+def _solver(iproc, combined, inds, nrows, fullParallel = False):
     '''
     Given the newton block diagonal matrix per paper, RHS variables (per paper) solves
     the system of equations.
@@ -109,14 +109,17 @@ def _solver(iproc, combined, inds, nrows):
 
     #naively find the least-squares solution to the system of equations.
     logging.info('solving system ...')
-
-    soln = multigrid_PARALLEL(iproc, combined, inds, nrows)
-
-    logging.info('finished solving system.')
-
-    return soln
-
-def solve(bus_count, constr_count, save=False):
+    if fullParallel == False: 
+        logging.info("solving bottom level in single node")        
+        if iproc == 0:
+            soln = multigrid_PARALLEL(iproc, combined, inds, nrows)    
+            logging.info('finished solving system.')    
+            return soln
+        else:
+            return None
+    else:
+        
+def solve(bus_count, constr_count, save=False, fullParallel = False):
 
     # load data, construct newton matrix, solve newton step
     nproc = MPI.COMM_WORLD.Get_size()
@@ -131,6 +134,6 @@ def solve(bus_count, constr_count, save=False):
 
     combined = _descend_level(iproc, splits)
 
+    soln = _solver(iproc, combined, inds, nrows, fullParallel = fullParallel)
     if iproc == 0:
-        soln = _solver(iproc, combined, inds, nrows)
         return soln
