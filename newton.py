@@ -93,8 +93,9 @@ def multigrid(A, rhs, current_level, terminal_level,
 
     if(current_level == terminal_level):
         # Direct Solve via ILU
+        ILU = sparse.linalg.spilu(B0 + 1e-4 * sparse.eye(B0.shape[0]))
 
-        ILU = sparse.linalg.spilu(B0)
+        #ILU = sparse.linalg.spilu(B0)
         (L1, U1) = (ILU.L, ILU.U)
         G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
         W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
@@ -164,9 +165,9 @@ def run_sample():
     return(res)
 
 
-def run_sample2(method = 'standard'):
+def run_sample2(nbus, ncont, method = 'standard'):
     '''More complicated - actually create block diagnal matrix and permute'''
-    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
+    (mname, rhsname, yname, cname) = get_names(nbus, ncont, "Data")
     model_data = sio.loadmat(mname)
     y0_data = sio.loadmat(yname)
     constr_data = sio.loadmat(cname)
@@ -669,11 +670,22 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
+    
+    total_local = np.concatenate((uli, yli))
     #(B, F, f) = otherData
     
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
+    nproc = MPI.COMM_WORLD.Get_size()
+    iproc = MPI.COMM_WORLD.Get_rank()
+    
+    if(iproc == 0):
+        left_bound = - len(yli)
+        right_bound = len(f)
+    else:
+        left_bound = (iproc - 1) * len(total_local)
+        right_bound = (iproc) * len(total_local)
 
-    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F * local_soln, False)
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * local_soln, False)
     u10 = ul0.reshape(len(ul0), 1)
     return((u10, local_soln))
 
@@ -1148,8 +1160,8 @@ for i in range(0, len(split_solve)):
 '''
 
 
-def run_run_sample4():
-    (mname, rhsname, yname, cname) = get_names(2224, 6, "Data")
+def run_run_sample4(nbus, ncont):
+    (mname, rhsname, yname, cname) = get_names(nbus, ncont, "Data")
     print("Running a simple test")
     res = run_sample4(mname, rhsname, yname, cname)
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
@@ -1191,9 +1203,9 @@ def shift_C0(C, ncont, inds):
 
 if __name__ == '__main__':
 
-   #ABCD = run_sample2('standard')
+#   ABCD = run_sample2(189, 1, 'standard')
 
-    run_run_sample4()
+#    run_run_sample4(189, 1)
 #
 # if __name__ == __main__:
 #    nproc = MPI.COMM_WORLD.Get_size()
