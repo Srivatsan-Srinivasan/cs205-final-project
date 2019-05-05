@@ -684,14 +684,16 @@ def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, n
 
     if(iproc == 0):
         left_bound = - len(yli)
-        right_bound = len(f)
+        right_bound = F.shape[1]
     else:
-        left_bound = (iproc - 1) * len(total_local)
-        right_bound = (iproc) * len(total_local)
-
+        left_bound = (iproc - 1) *len(combined_local)
+        right_bound = (iproc) * len(combined_local)
+    print("Left bound is %d and right is %d" % (left_bound, right_bound))
     ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
+    #print("U10 shape is %s" % str(u10))
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
     u10 = ul0.reshape(len(ul0), 1)
+    print("u10 shape is %s" %  str(u10.shape))
     return((u10, combined_local))
 
 
@@ -1119,7 +1121,7 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
             u0 = u0.reshape(len(u0), 1)
             y0 = np.concatenate((u0, y1))
             res = repermute(y0, inds[1])
-        
+            #print("Residual is %f" % sparse.linalg.norm(M_n * y0 - rhs))
     #    return(res)
     
     if(useMPI_2 == True):
@@ -1135,16 +1137,21 @@ def run_sample4(model_fname, rhs_fname, y0_fname, constr_fname, useMPI_1 = True,
         inner_soln = outer_solver_wrapper(local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
                              local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
                              tol = 1e-6)
-        print("I am proc %d and I've finishign my processing my results are %s" % (iproc, str(inner_soln)))    
+        print("I am proc %d and I've finishign my processing my results are %s. Shapes are %s, %s" % (iproc, str(inner_soln), str(inner_soln[0].shape), str(inner_soln[1].shape)))    
        
         
         combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
-        us =  [u for u in combined2[0]]
-        ys = [y for y in combined2[1]]
-        us = np.concatenate(us)
-        ys = np.concatenate(ys)
-        res = np.concatenate((us, ys))
-        res = repermute(res, inds[1])
+       # combined2 = combined2[1:] +[combined[0]]
+        if(iproc == 0):
+            combined2 = combined2[1:] +[combined2[0]]
+            us =  [u[0] for u in combined2]
+            ys = [y[1] for y in combined2]
+            us = np.concatenate(us)
+            ys = np.concatenate(ys)
+            res = np.concatenate((us, ys))
+            print("RES is shape %s with looking like \n %s" %(str(res.shape), str(res)))
+            print("Residual is %f" % (np.linalg.norm(M_n * res - rhs)))
+            res = repermute(res, inds[1])
 
     return(res)
 '''
@@ -1166,7 +1173,7 @@ for i in range(0, len(split_solve)):
 
 
 def run_run_sample4(method = "standard"):
-    (mname, rhsname, yname, cname) = get_names(5, 1, "Data")
+    (mname, rhsname, yname, cname) = get_names(189, 4, "Data")
     print("Running a simple test")
     res = run_sample4(mname, rhsname, yname, cname, useMPI_2 = True, method = method)
     print("Finished running and procesor %d has below" % MPI.COMM_WORLD.Get_rank())
