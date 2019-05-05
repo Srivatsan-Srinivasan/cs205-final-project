@@ -168,6 +168,9 @@ def get_specific_dim(model_data, cons_num):
     dims = model_specific[0][0][info_mapping['dim']][0][0]
     return((dims, dim_mapping))
 
+def get_num_cont(model_data):
+    return(len(model_data[0][0][1][0]) - 1)
+
 def permute_NewtonBDMatrix(model_data, method = "standard"):
     '''The algorithm here is to permute to get the same type of variables together. 
     Roughtly speaking instead of grouping by contingency directly we want to group by 
@@ -179,7 +182,7 @@ def permute_NewtonBDMatrix(model_data, method = "standard"):
     # method types: 
     # standard (group lambdas together and then group (nu/theta))
     # grouped (group all lambdas together than all nu and then all theta)
-    ncont = len(model_data[0][0][1][0]) - 1
+    ncont = get_num_cont(model_data)
     inds = {'deltaTheta': [], 'deltaLambda': [], 'deltaNu': [],
             'rDual': [], 'rCent': [], 'rPri': []}
 
@@ -553,18 +556,241 @@ def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None)
 
     return res
 
-def multigrid_full_parallel(iproc, combined, inds, nrows, split_solve=None, res=None):
-    newA= combined[0][0].copy()
-    newG = combined[0][1].copy()
-    for i in range(1, len(combined)):
-        newA += combined[i][0]
-        newG += combined[i][1]
-    otherInfo = [(x[3], x[4], x[5]) for x in combined]
 
-    
 def local_schurs(inputs):
     (B, F, E, C, f, g, u) = inputs
     A1_local = C - E * sparse.diags(1/B.diagonal()) * F
     g1_local = g - E * sparse.diags(1/B.diagonal()) * f
 
     return((A1_local, g1_local, u, B, F, f))
+    
+    
+    
+def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=None, res=None):
+    ncont = get_num_cont(model)
+    if(iproc == 0):
+        newA= combined[0][0].copy()
+        newG = combined[0][1].copy()
+        for i in range(1, len(combined)):
+            newA += combined[i][0]
+            newG += combined[i][1]
+        otherInfo = [(x[3], x[4], x[5]) for x in combined]
+        split_solve = distributed_data_calc(model, newA, newG, ncont, otherInfo, moveZero = True)
+    
+        local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
+        (B, F, f) = local_inputs[-1]
+     #   print("Local input %d has %s" % (iproc, str(local_inputs)))
+  #      print(local_inputs)
+        inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
+                             local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
+                             tol = 1e-6)
+  #      logging.info("I am proc %d and I've finishing my processing my results are %s" % (iproc, str(inner_soln)))    
+       
+        
+        combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
+        if(iproc == 0):
+            combined2 = combined2[1:] + [combined2[0]]
+            us =  [u[0] for u in combined2]
+            ys = [y[1] for y in combined2]
+            us = np.concatenate(us)
+            ys = np.concatenate(ys)
+            res = np.concatenate((us, ys))
+            res = repermute(res, inds[1])
+
+def split_to_distributed(model, Ar, rhsr, num_cont):
+    '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
+    Ar2 = Ar
+    (cols, rows, inds) = permute_NewtonBDMatrix(model)
+#    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
+#    rhsr = rhsr[np.concatenate(cols)]
+
+    to_split_arr = []
+    rhs_split_arr = []
+    start_r = 0
+    start_c = 0
+    for i in range(0, num_cont + 1):
+        (i_row, i_col) = (len(rows[i]), len(cols[i]))
+        to_split_arr.append(Ar2[start_r: start_r+i_row, start_c:start_c+i_col])
+        rhs_split = rhsr[start_r:start_r + i_row]
+        inter = len(inds['rDual'][i])
+        fi = rhs_split[:inter]
+        gi = rhs_split[inter:]
+        rhs_split_arr.append((fi, gi))
+        start_r += i_row
+        start_c += i_col
+    
+    
+    check1 = Ar2[:, start_c:]
+    check2 = Ar2[start_r:, :]
+    assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
+    Cp = Ar2[start_r:, start_c:]
+    rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
+    #to_split_arr.append(Cp)
+    #rhs_split_arr.append(rhs_left)
+    
+    to_split_arr.insert(0, Cp)
+    rhs_split_arr.insert(0, rhs_left)
+    Hps_outer = []
+    Hps_inner = []
+    start_c = 0
+    for i in range(0, num_cont + 1):
+        #(i_col) = (len(cols[i]))
+        th_len = len(inds['deltaTheta'][i])
+        th_nu = len(inds['deltaNu'][i])
+        Hps_inner.append(
+            Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
+        Hps_outer.append(
+            [Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu]])
+    #Hps_outer.append(Hps_inner)
+    Hps_outer.insert(0, Hps_inner)
+    print("Len is %d" % len(Hps_outer[0]))
+    return(to_split_arr, rhs_split_arr, Hps_outer)
+
+
+def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
+    
+    local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
+                                         num_restarts=num_restarts, tol=tol)
+    (uli, yli) = local_soln
+    #(B, F, f) = otherData
+    
+    total_local = np.concatenate(local_soln)
+
+    if(iproc == 0):
+        left_bound = - len(yli)
+        right_bound = len(f)
+    else:
+        left_bound = (iproc - 1) * len(total_local)
+        right_bound = (iproc) * len(total_local)
+
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * total_local, False)
+ #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
+    u10 = ul0.reshape(len(ul0), 1)
+    return((u10, local_soln))
+
+
+def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
+    (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
+    if(otherData is not None):
+        if(moveZero == True):
+            otherData = otherData.insert(0, otherData.pop())
+        grouped = [(x, y, z, misc) for x, y, z,misc in zip(Bs, rhs, Hps, otherData)]
+    else:
+        grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
+    return(grouped)
+
+
+def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
+    '''Distributed gmres solver'''
+    nproc = MPI.COMM_WORLD.Get_size()
+    iproc = MPI.COMM_WORLD.Get_rank()
+    if(len(fi)):
+        combined = np.concatenate((fi, gi))
+    else:
+        combined = gi
+    #TODO: Need to update to match matlab better
+    thresh = None
+    if((Ai.diagonal()).prod() == 0):
+        thresh = 0
+        
+    (L, U, L_inner, U_inner, r) = (None, None, None, None, None)
+    #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
+    if(useSchurs):
+      #  ILU = sparse.linalg.spilu(Ai)
+       # (L, U) = (ILU.L, ILU.U)
+        #(L_inner, U_inner) = get_S(L, U, len(fi))
+        #r = fwd_back(combined, L, U)
+        r = sparse.linalg.gmres(Ai, combined)[0]
+    (Hi, dx, Bi, Hi) = (None, None, None, None)
+     
+  #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
+    if(yguess == None):
+        yguess = np.zeros_like(gi)
+        if(r is not None):
+            yguess = np.reshape(r, yguess.shape)
+    for count in range(0, num_restarts):
+        '''Do this communcation part for number of iteration'''
+        #print("Adjusted left for %d at num_restart:%d is %s" % (iproc, count, st)
+        if(nproc == 1):
+            adjust_left = np.zeros_like(yguess)
+        else:
+            interface_y = communicate_interface(iproc, nproc, yguess)
+            #Do the dot product
+            adjust_left = interface_dotProd(interface_y, Hips)
+            print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
+            print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
+	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
+        if(useSchurs):
+            Pr = r[len(fi):]
+            yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
+            
+        else:
+            Hi = Ai[len(fi):, :len(fi)]
+            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+            Bi = Ai[:len(fi), :len(fi)]
+            HiT = Ai[:len(fi), len(fi):]
+            yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
+        
+        residual = np.linalg.norm(yguess_new - yguess)
+        yguess = np.reshape(yguess_new, yguess.shape)    
+        #Alwayts stop if the residual keeps on going down
+        #if(residual < tol):
+         #   break
+    
+    #Now commmunicate what's left
+    if(nproc != 1):
+        interface_y = communicate_interface(iproc, nproc, yguess)
+        t = interface_dotProd(interface_y, Hips)
+    else:
+        t = np.zeros_like(gi)
+    #Subtract it out and do a final solve
+    gi = gi - t
+    
+    if(not useSchurs):
+        Hi = Ai[len(fi):, :len(fi)]
+        dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+        Bi = Ai[:len(fi), :len(fi)]
+        HiT = Ai[:len(fi), len(fi):]
+        yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
+        combined_soln = np.concatenate((dx, yguess_new))
+
+    else:        
+        if(len(fi)):
+            combined = np.concatenate((fi, gi))
+        else:
+            combined = gi
+    #    combined = np.concatenate((fi, gi.flatten()))
+        combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
+    return(combined_soln)
+
+def communicate_interface(iproc, nproc, toSend, useMPI = True):
+    if(not useMPI):
+        return([np.zeros_like(toSend)])
+    from_other_to_root = toSend
+    if(iproc == 0):
+        from_other_to_root = None
+    cont_to_power_injection = MPI.COMM_WORLD.gather(from_other_to_root, root = 0)
+    print("For %d I have cont for cont power %s" % (iproc, str(cont_to_power_injection)))
+    toBcast = None
+    if(iproc == 0):
+        toBcast = [toSend]
+    power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = 0)
+    print("For %d I have power %s" %(iproc, str(power_injection_to_cont)))
+    interface_y = None
+    if(iproc == 0):
+        interface_y = [x for x in cont_to_power_injection if x is not None]
+    else:
+        interface_y = power_injection_to_cont
+    print("For %d i have interface beign %s" % (iproc, str(interface_y)))
+    return(interface_y)
+    
+def interface_dotProd(interface_y, Hips):
+    adjust_left = 0
+    for index in range(0, len(Hips)):
+        print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
+        temp = Hips[index] * interface_y[index]
+	#print('hi')	
+        adjust_left += temp
+    return(adjust_left)
+
+

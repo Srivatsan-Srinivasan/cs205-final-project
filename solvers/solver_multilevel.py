@@ -23,6 +23,8 @@ from .solver_utils import permute_sparse_matrix
 from .solver_utils import split_newton_matrix
 from .solver_utils import local_schurs
 
+from .solver_utils import multigrid_full_parallel
+
 def _load_data(bus_count, constr_count):
     '''
     Given number of busses and number of power network constraints, loades the MATLAB matrices.
@@ -94,7 +96,7 @@ def _descend_level(iproc, splits):
 
     return combined
 
-def _solver(iproc, combined, inds, nrows, fullParallel = False):
+def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
     '''
     Given the newton block diagonal matrix per paper, RHS variables (per paper) solves
     the system of equations.
@@ -118,6 +120,14 @@ def _solver(iproc, combined, inds, nrows, fullParallel = False):
         else:
             return None
     else:
+        logging.info("solving bottom level in single node")        
+        if iproc == 0:
+            soln = multigrid_full_parallel(iproc, combined, inds, nrows, model_data)    
+            logging.info('finished solving system.')    
+            return soln
+        else:
+            return None
+
         
 def solve(bus_count, constr_count, save=False, fullParallel = False):
 
@@ -134,6 +144,6 @@ def solve(bus_count, constr_count, save=False, fullParallel = False):
 
     combined = _descend_level(iproc, splits)
 
-    soln = _solver(iproc, combined, inds, nrows, fullParallel = fullParallel)
+    soln = _solver(iproc, combined, inds, nrows, model_data, fullParallel = fullParallel)
     if iproc == 0:
         return soln
