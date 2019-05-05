@@ -23,6 +23,8 @@ from .solver_utils import permute_sparse_matrix
 from .solver_utils import split_newton_matrix
 from .solver_utils import local_schurs
 
+from .solver_utils import multigrid_full_parallel
+
 def _load_data(bus_count, constr_count):
     '''
     Given number of busses and number of power network constraints, loades the MATLAB matrices.
@@ -94,7 +96,7 @@ def _descend_level(iproc, splits):
 
     return combined
 
-def _solver(iproc, combined, inds, nrows):
+def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
     '''
     Given the newton block diagonal matrix per paper, RHS variables (per paper) solves
     the system of equations.
@@ -109,14 +111,26 @@ def _solver(iproc, combined, inds, nrows):
 
     #naively find the least-squares solution to the system of equations.
     logging.info('solving system ...')
+    if fullParallel == False: 
+        logging.info("solving bottom level in single node")        
+        if iproc == 0:
+            soln = multigrid_PARALLEL(iproc, combined, inds, nrows)    
+            logging.info('finished solving system.')    
+            return soln
+        else:
+            return None
+    else:
+        logging.info("solving bottom level in single node")        
+        #if iproc == 0:
+        soln = multigrid_full_parallel(iproc, combined, inds, nrows, model_data)    
+        if(iproc == 0):
+            logging.info('finished solving system.')    
+            return soln
+        else:
+            return None
 
-    soln = multigrid_PARALLEL(iproc, combined, inds, nrows)
-
-    logging.info('finished solving system.')
-
-    return soln
-
-def solve(bus_count, constr_count, save=False):
+        
+def solve(bus_count, constr_count, save=False, fullParallel = False):
 
     # load data, construct newton matrix, solve newton step
     nproc = MPI.COMM_WORLD.Get_size()
@@ -124,6 +138,9 @@ def solve(bus_count, constr_count, save=False):
     inode = MPI.Get_processor_name()
 
     splits = None
+    inds = None
+    nrows = None
+    model_data = None
     if iproc == 0:
         #master node
         model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
@@ -131,6 +148,6 @@ def solve(bus_count, constr_count, save=False):
 
     combined = _descend_level(iproc, splits)
 
+    soln = _solver(iproc, combined, inds, nrows, model_data, fullParallel = fullParallel)
     if iproc == 0:
-        soln = _solver(iproc, combined, inds, nrows)
         return soln
