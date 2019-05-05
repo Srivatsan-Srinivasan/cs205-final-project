@@ -661,28 +661,46 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     return(to_split_arr, rhs_split_arr, Hps_outer)
 
 
-def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
+def fwd_back(b, L, U):
+    '''SImple forward bck sub'''
+    inter = sparse.linalg.spsolve_triangular(L, b)
+    x = sparse.linalg.spsolve_triangular(U, inter, False)
+    return(x)
+
+
+def get_S(L, U, num=33):
+    '''Handle getting Schur complement from L, U
+    TODO Actually do it - for now just return'''
+    return(L[num:, num:], U[num:, num:])
+
+
+def outer_solver_wrapper(Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
     
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
+    combined_local = np.concatenate(local_soln)
     #(B, F, f) = otherData
     
-    total_local = np.concatenate(local_soln)
+ #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
+    print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
+	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
+   
+    iproc = MPI.COMM_WORLD.Get_rank()
 
     if(iproc == 0):
         left_bound = - len(yli)
-        right_bound = len(f)
+        right_bound = F.shape[1]
     else:
-        left_bound = (iproc - 1) * len(total_local)
-        right_bound = (iproc) * len(total_local)
-
-    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * total_local, False)
+        left_bound = (iproc - 1) *len(combined_local)
+        right_bound = (iproc) * len(combined_local)
+    print("Left bound is %d and right is %d" % (left_bound, right_bound))
+    ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
+    #print("U10 shape is %s" % str(u10))
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
     u10 = ul0.reshape(len(ul0), 1)
-    return((u10, local_soln))
-
-
+    print("u10 shape is %s" %  str(u10.shape))
+    return((u10, combined_local))
 
 
 def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
@@ -736,7 +754,6 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             HiT = Ai[:len(fi), len(fi):]
             yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
         
-        residual = np.linalg.norm(yguess_new - yguess)
         yguess = np.reshape(yguess_new, yguess.shape)    
         #Alwayts stop if the residual keeps on going down
         #if(residual < tol):
@@ -766,8 +783,11 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             combined = gi
     #    combined = np.concatenate((fi, gi.flatten()))
         combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
-    return(combined_soln)
-
+    return(combined_soln[:len(fi)], combined_soln[len(fi):])
+        
+#gmres_solver_wrapper(newA, np.zeros((0, 1)), newG, [], True)
+    
+    
 def communicate_interface(iproc, nproc, toSend, useMPI = True):
     if(not useMPI):
         return([np.zeros_like(toSend)])
@@ -797,7 +817,7 @@ def interface_dotProd(interface_y, Hips):
 	#print('hi')	
         adjust_left += temp
     return(adjust_left)
-
+            
 
 def find_regrouping(model):
     '''For the last level after eliminating lambda, now group so that 
