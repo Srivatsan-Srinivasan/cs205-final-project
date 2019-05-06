@@ -484,6 +484,7 @@ def split_newton_matrix(A, rhs, nrows, ncont, nprocess, model, inds):
                for (B, F, E, C, f, g, u) in zip(Bs, Fs, Es, Cs, fs, gs, us)]
 
     As = []
+    '''
     for i in range(0, len(Fs)):
         b = Bs[i]
         e = Es[i]
@@ -491,6 +492,7 @@ def split_newton_matrix(A, rhs, nrows, ncont, nprocess, model, inds):
         g = gs[i]
         temp_res = g - e * sparse.diags(1/b.diagonal()) * f
         As.append(temp_res)
+    '''
     return(to_send, As)
 
 def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None):
@@ -583,7 +585,7 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
      #   print("Local input %d has %s" % (iproc, str(local_inputs)))
   #      print(local_inputs)
     inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
-                             local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
+                             local_inputs[2], B, F, f, True, niter = 10, num_restarts = 10, 
                              tol = 1e-6)
   #      logging.info("I am proc %d and I've finishing my processing my results are %s" % (iproc, str(inner_soln)))    
        
@@ -599,6 +601,8 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
         res = repermute(res, inds[1])
         return(res)
 
+
+
 def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
     if(otherData is not None):
@@ -608,6 +612,7 @@ def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= T
     else:
         grouped = [(x, y, z) for x, y, z in zip(Bs, rhs, Hps)]
     return(grouped)
+
 
 def split_to_distributed(model, Ar, rhsr, num_cont):
     '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
@@ -635,7 +640,9 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     
     check1 = Ar2[:, start_c:]
     check2 = Ar2[start_r:, :]
-    assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
+    diff = sparse.linalg.norm(check1 - check2.T)
+    print("Diff is %d" % diff )
+    assert(diff < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
     #to_split_arr.append(Cp)
@@ -679,21 +686,16 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
     combined_local = np.concatenate(local_soln)
-    #(B, F, f) = otherData
-    
- #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
-  #  print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
-#	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
-   
-#    iproc = MPI.COMM_WORLD.Get_rank()
 
+    nproc = MPI.COMM_WORLD.Get_size()
     if(iproc == 0):
-        left_bound = - len(yli)
-        right_bound = F.shape[1]
+        left_bound = 0
+        right_bound = len(gi)
     else:
-        left_bound = (iproc - 1) *len(combined_local)
-        right_bound = (iproc) * len(combined_local)
- #   print("Left bound is %d and right is %d" % (left_bound, right_bound))
+        right_bound = F.shape[1] - (nproc - iproc - 1) *len(combined_local)
+        left_bound = F.shape[1] -(nproc - iproc) * len(combined_local)
+    print("Left bound is %d and right is %d" % (left_bound, right_bound))
+    print("B: %s, f: %s, F; %s, cl: %s" %(str(B.shape), str(f.shape), str(F.shape), str(combined_local.shape)))
     ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
     #print("U10 shape is %s" % str(u10))
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
@@ -702,11 +704,20 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     return((u10, combined_local))
 
 
+
 def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
     '''Distributed gmres solver'''
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
-    if(len(fi)):
+    f_len = len(fi)
+    g_len = len(gi)
+    
+    ''''For stabilty reasons, we're going to add in the Hips part into the lower left of this 
+       matrix. This gives a better ILU estimate for preconditoing. Then when we adjust our right hand side 
+       we can subtract out the Hips * delP term (the solution gi) from our equation so 
+       that we're counting correctly.'''
+    add_back_in = (iproc != 0)
+    if(f_len):
         combined = np.concatenate((fi, gi))
     else:
         combined = gi
@@ -714,43 +725,51 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     thresh = None
     if((Ai.diagonal()).prod() == 0):
         thresh = 0
-        
+     
     (L, U, L_inner, U_inner, r) = (None, None, None, None, None)
     #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
     if(useSchurs):
-      #  ILU = sparse.linalg.spilu(Ai)
-       # (L, U) = (ILU.L, ILU.U)
-        #(L_inner, U_inner) = get_S(L, U, len(fi))
-        #r = fwd_back(combined, L, U)
-        r = sparse.linalg.gmres(Ai, combined)[0]
+        # Using the precondinor
+
+        if(add_back_in):
+            Ai[f_len:, f_len:] +=  Hips[0]
+        M_2 = sparse.linalg.spilu(Ai)
+        M = sparse.linalg.LinearOperator(Ai.shape, M_2.solve)
+        r = sparse.linalg.gmres(Ai,combined,M=M)[0]
+        #r = sparse.linalg.gmres(Ai, combined)[0]
+        
+        Aicut = Ai[-g_len:, -g_len:] 
+        M_2cut = sparse.linalg.spilu(Aicut)
+        Mcut = sparse.linalg.LinearOperator(Aicut.shape, M_2cut.solve)
+
     (Hi, dx, Bi, Hi) = (None, None, None, None)
-     
+    Pr = r[len(fi):]
   #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
     if(yguess == None):
-        yguess = np.zeros_like(gi)
+        yguess = Pr
         if(r is not None):
-            yguess = np.reshape(r, yguess.shape)
+            yguess = np.reshape(Pr, gi.shape)
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
-        #print("Adjusted left for %d at num_restart:%d is %s" % (iproc, count, st)
         if(nproc == 1):
             adjust_left = np.zeros_like(yguess)
         else:
             interface_y = communicate_interface(iproc, nproc, yguess)
             #Do the dot product
             adjust_left = interface_dotProd(interface_y, Hips)
-         #   print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
-          #  print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
-	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
+            if(add_back_in):
+                adjust_left = adjust_left + (Hips[0].todense() * yguess[-g_len:])
+            adjust_left = np.reshape(adjust_left, gi.shape)
         if(useSchurs):
-            Pr = r[len(fi):]
-            yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
+            diff2 = gi - adjust_left
+            print("Shape of Aicut %s and Bicut is %s" % (str(Aicut.shape), str(diff2.shape)))
+            yguess_new = sparse.linalg.gmres(Aicut, gi - adjust_left, Pr, restart = None, M=Mcut)[0]
             
         else:
-            Hi = Ai[len(fi):, :len(fi)]
+            Hi = Ai[f_len:, :f_len]
             dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
-            Bi = Ai[:len(fi), :len(fi)]
-            HiT = Ai[:len(fi), len(fi):]
+            Bi = Ai[:f_len, :f_len]
+            HiT = Ai[:f_len, f_len:]
             yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
         
         yguess = np.reshape(yguess_new, yguess.shape)    
@@ -762,6 +781,9 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     if(nproc != 1):
         interface_y = communicate_interface(iproc, nproc, yguess)
         t = interface_dotProd(interface_y, Hips)
+        if(add_back_in):
+            t += Hips[0].todense() * yguess[-g_len:]
+
     else:
         t = np.zeros_like(gi)
     #Subtract it out and do a final solve
@@ -776,13 +798,13 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
         combined_soln = np.concatenate((dx, yguess_new))
 
     else:        
-        if(len(fi)):
+        if(f_len):
             combined = np.concatenate((fi, gi))
         else:
             combined = gi
     #    combined = np.concatenate((fi, gi.flatten()))
-        combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
-    return(combined_soln[:len(fi)], combined_soln[len(fi):])
+        combined_soln = sparse.linalg.gmres(Ai, combined, M=M)[0].reshape(len(combined), 1)
+    return(combined_soln[:f_len], combined_soln[f_len:])
         
 #gmres_solver_wrapper(newA, np.zeros((0, 1)), newG, [], True)
     

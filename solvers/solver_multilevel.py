@@ -9,8 +9,20 @@ Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
 '''
 import logging
 from mpi4py import MPI
+'''
+from utils import get_filepaths
+from utils import load_filepaths
+from utils import calculate_residuals
+from scipy import sparse
 
-#from .utils import get_filepaths
+from solver_utils import construct_NewtonBDMatrix
+from solver_utils import permute_NewtonBDMatrix
+from solver_utils import multigrid_PARALLEL
+from solver_utils import permute_sparse_matrix
+from solver_utils import split_newton_matrix
+from solver_utils import local_schurs
+from solver_utils import multigrid_full_parallel
+'''
 from .utils import get_filepaths
 from .utils import load_filepaths
 from .utils import calculate_residuals
@@ -22,7 +34,6 @@ from .solver_utils import multigrid_PARALLEL
 from .solver_utils import permute_sparse_matrix
 from .solver_utils import split_newton_matrix
 from .solver_utils import local_schurs
-
 from .solver_utils import multigrid_full_parallel
 
 def _load_data(bus_count, constr_count):
@@ -50,7 +61,7 @@ def _load_data(bus_count, constr_count):
 
     return model_data, rhs_data, y0_data, constr_data
 
-def _construct_newton(model_data, rhs_data, y0_data, constr_data):
+def _construct_newton(model_data, rhs_data, y0_data, constr_data, grouping = 'standard'):
     '''
     Given the model, Y0 variables (per paper) variables, constraint data file matrix
     the newton block diagonal matrix per paper.
@@ -70,7 +81,7 @@ def _construct_newton(model_data, rhs_data, y0_data, constr_data):
 
     newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
 
-    inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
+    inds, nrows = permute_NewtonBDMatrix(model_data, grouping)    
 
     newton_matrix = permute_sparse_matrix(newton_matrix, inds[0], inds[1])    
     rhs_data = rhs_data[inds[0]]
@@ -130,9 +141,11 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
 
         
-def solve(bus_count, constr_count, save=False, fullParallel = False):
+def solve(bus_count, constr_count, save=False, fullParallel = False, grouping = None):
 
     # load data, construct newton matrix, solve newton step
+    if(grouping == None):
+        grouping = "grouped" if fullParallel else "standard"
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
     inode = MPI.Get_processor_name()
@@ -144,7 +157,7 @@ def solve(bus_count, constr_count, save=False, fullParallel = False):
     if iproc == 0:
         #master node
         model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
-        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data)
+        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data, grouping=grouping)
 
     combined = _descend_level(iproc, splits)
 
