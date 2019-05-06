@@ -10,6 +10,10 @@ Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
+import multiprocessing as mp
+import os
+import sys
+import scipy.io as sio
 from mpi4py import MPI
 
 def make_mapping(d):
@@ -45,7 +49,75 @@ def get_model_specific(model_data, constr_num):
     '''Get the constraint specific model information'''
     return model_data[0][0][1][0][constr_num]
 
-def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
+def parallel_newton(con_num):
+    '''
+    Given a contingency number from the construct_NewtonBDMatrix function, return the r_M/r_B deconstruction using multiprocessing
+
+    Args:
+        con_num (int): the index of the contingency being looked at
+    Returns:
+        r_M: the sparse matrix M that is deconstructed from A
+        r_B: the sparse matrix B that is deconstructed from B
+    '''
+    #set local variables to global variables
+    model = MODEL
+    lam_u_s = LAM_U_S
+    y0 = Y0
+    dim_y0_mapping = DIM_Y0_MAPPING
+    theta = THETA
+    constr_mapping = CONSTR_MAPPING
+    constr_data = CONSTR_DATA
+
+    model_specific = get_model_specific(model, con_num)
+    info_mapping= make_mapping(model_specific)
+    dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
+    nieq = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['nineq']][0][0]   
+
+    # TODO: should use a mapping for A2, D2 etc...
+    A2 = model_specific[0][0][8] 
+    D2 = model_specific[0][0][9]
+    B =  model_specific[0][0][5]    
+    m = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['m']][0][0]   
+
+    gval = np.zeros((nieq, 1))
+    gval[:m] = D2.dot(A2).dot(theta) - constr_data[0][0][constr_mapping['uf']][0][con_num]
+    gval[m:2*m] = -D2.dot(A2).dot(theta) + constr_data[0][0][constr_mapping['lf']][0][con_num]
+    gval = gval.flatten()
+
+    Dg = np.concatenate((D2.dot(A2),-D2.dot(A2)))
+    Ax = B
+
+    dim_th = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['th']][0][0]        
+    dim_n = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['n']][0][0]
+    
+
+    ab = (y0[0][0][dim_y0_mapping['lam']][0][con_num]).flatten()
+    LM = -1 * np.diag(ab)
+
+    LM = LM.dot(Dg)
+
+    r1_M = [np.zeros((dim_th, dim_th)),    Dg.T ,                       Ax.T]
+    r2_M = [LM,                 -np.diag(gval),               np.zeros((nieq, dim_n))]
+    r3_M = [Ax,                  np.zeros((dim_n, nieq)),     np.zeros((dim_n, dim_n))]
+    r_M = [r1_M,r2_M,r3_M]
+
+    r_M = sparse.csr_matrix(np.block(r_M))
+
+
+    Au = -1 * np.eye(dim_n)
+
+    r1_B = [np.zeros((dim_th, dim_n)), np.zeros((dim_th, lam_u_s))]
+    r2_B = [np.zeros((nieq, dim_n)), np.zeros((nieq, lam_u_s))]
+    r3_B = [Au, np.zeros((dim_n, lam_u_s))]
+    r_B = [r1_B,r2_B,r3_B]
+
+    r_B = sparse.csr_matrix(np.block(r_B))
+    
+    #return None
+
+    return r_M,r_B
+
+def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0):
     '''
     Given the model, Y0 variables (per paper), constraint data file matrix, constructs
     the newton block diagonal matrix per paper.
@@ -55,6 +127,121 @@ def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
         y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
         constr_data (scipy.sparse or numpy matrices): constraint data file matrix
 
+    Returns:
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
+    '''
+
+    #model = model_data['model']
+    model = model_data
+    y0 = y0_data
+    global MODEL 
+    MODEL = model
+    #y0 = y0_data['y0']
+    global Y0 
+    Y0 = y0
+
+    dim_y0_mapping = make_mapping(y0[0])
+    global DIM_Y0_MAPPING 
+    DIM_Y0_MAPPING = dim_y0_mapping 
+    lam_u_s = np.size(y0[0][0][dim_y0_mapping['lam_u']])
+    global LAM_U_S 
+    LAM_U_S = lam_u_s   
+    theta = y0[0][0][dim_y0_mapping['th']][0][0]
+    global THETA 
+    THETA = theta    
+
+    constr_mapping = make_mapping(constr_data[0])
+    global CONSTR_MAPPING 
+    CONSTR_MAPPING = constr_mapping
+
+    global CONSTR_DATA
+    CONSTR_DATA = constr_data
+
+
+    #Total specific to consider
+    total_cons = len(model[0][0][1][0])
+
+
+    #Create the M and the Bu matri foe each contigency
+    if nproc == 0:
+        nproc = total_cons
+
+    Ms = []
+    Bu = []
+    pool = mp.Pool(processes = nproc)
+    ans = pool.map(parallel_newton,np.arange(total_cons))
+
+    for con in ans:
+        Ms.append(con[0])
+        Bu.append(con[1])
+
+
+    del MODEL, Y0, DIM_Y0_MAPPING, LAM_U_S, THETA, CONSTR_MAPPING
+
+    g_u = np.zeros((lam_u_s, 1));
+        
+        
+    general_mapping= make_mapping(model[0][0][0][0][0])
+    dims_general = model[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)
+
+    #TODO: Fix naming...
+    n = dims_general[0][0][dims_general_mapping['p']][0][0]
+    p = y0[0][0][dim_y0_mapping['p']]
+    g_u[:n] = p - constr_data[0][0][constr_mapping['up']]
+    g_u[n:2*n] = -p + constr_data[0][0][constr_mapping['lp']];
+
+
+    Dg_u = np.concatenate((np.eye(n), -np.eye(n)))
+    pars_general = model[0][0][0][0][0][general_mapping['par']]
+    pars_mapping = make_mapping(pars_general)
+    par_W = pars_general[0][0][pars_mapping['W']]
+
+    temp = np.diag(y0[0][0][dim_y0_mapping['lam_u']].flatten())
+    r1 = [2*par_W, Dg_u.T]
+    r2 = [-temp.dot(Dg_u), -1 * np.diag(g_u.flatten())]
+    Du = np.block([r1, r2])
+
+    BB_nrows = dims_general[0][0][dims_general_mapping['BB_nrows']][0][0]
+    BB_ncols = dims_general[0][0][dims_general_mapping['BB_ncols']][0][0]
+    BB = np.zeros((BB_nrows, BB_ncols))
+
+    #This shift is just keep track of where we need to update in the block matrices
+    shift = 0
+    for con_num in range(total_cons):
+        model_specific_i = get_model_specific(model, con_num)
+        specific_mapping = make_mapping(model_specific_i)
+        dims = model_specific_i[0][0][specific_mapping['dim']]
+        dims_mapping = make_mapping(dims)
+        BB_nrows = dims[0][0][dims_mapping['BB_nrows']][0][0]
+        BB[shift :BB_nrows + shift, : ] = Bu[con_num].toarray()
+        shift += BB_nrows
+
+    if total_cons == 0:
+        AA = Ms[0]
+    else:
+        AA = sparse.block_diag(Ms)
+
+    # Combine it all together! 
+
+    '''
+        AA: Combination of all the Ms
+        Du: Primary/dual variables related to the initial physical construactions
+        BB: something in betweenn...(should be a bit more clear)
+        '''
+    M_newton = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
+
+    return M_newton
+
+
+def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
+    '''
+    Given the model, Y0 variables (per paper), constraint data file matrix, constructs
+    the newton block diagonal matrix per paper.
+    Args:
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        constr_data (scipy.sparse or numpy matrices): constraint data file matrix
     Returns:
         newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
     '''
