@@ -67,18 +67,13 @@ def _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel
 
 
     #construct newton block diagonal matrix per paper
-    logging.info('constructing newton matrix ...')
-    import time
-    startTime = time.time()
+    logging.info('constructing newton matrix ...')    
     if newtonParallel:
         logging.info('construct in parallel mode')
         newton_matrix = construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, newton_nproc)
     else:
         logging.info('construct in serial mode')
         newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
-    endTime = time.time()
-    print('newton construct took {}s'.format(endTime - startTime))
-    raise ValueError
     inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
 
     newton_matrix = permute_sparse_matrix(newton_matrix, inds[0], inds[1])    
@@ -139,7 +134,7 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
 
         
-def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False, newton_nproc=None):
+def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False, newton_nproc = 0):
 
     # load data, construct newton matrix, solve newton step
     nproc = MPI.COMM_WORLD.Get_size()

@@ -117,7 +117,7 @@ def parallel_newton(con_num):
 
     return r_M,r_B
 
-def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=None):
+def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0):
     '''
     Given the model, Y0 variables (per paper), constraint data file matrix, constructs
     the newton block diagonal matrix per paper.
@@ -163,7 +163,7 @@ def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=No
 
 
     #Create the M and the Bu matri foe each contigency
-    if nproc is None:
+    if nproc == 0:
         nproc = total_cons
 
     Ms = []
