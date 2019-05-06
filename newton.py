@@ -444,107 +444,110 @@ def parallel_newton(con_num):
 '''========================CREATE NEWTON MATRIX========================='''
 '''====================================================================='''
 
-nbus = sys.argv[1]
-cont = sys.argv[2]
+def create_M_Newton():
+    global model_data, y0_data, constr_data, model, y0, dim_y0_mapping, lam_u_s, theta, constr_mapping
+    nbus = sys.argv[1]
+    cont = sys.argv[2]
 
-model_data = sio.loadmat("Data/model_"+nbus+"_nbus"+str(cont)+"_ncont")
-y0_data = sio.loadmat("Data/y0_"+nbus+"_nbus"+str(cont)+"_ncont")
-constr_data = sio.loadmat("Data/constr_"+nbus+"_nbus"+str(cont)+"_ncont")
-#rhs = sio.loadmat('rhs')['rhs']
+    model_data = sio.loadmat("Data/model_"+nbus+"_nbus"+str(cont)+"_ncont")
+    y0_data = sio.loadmat("Data/y0_"+nbus+"_nbus"+str(cont)+"_ncont")
+    constr_data = sio.loadmat("Data/constr_"+nbus+"_nbus"+str(cont)+"_ncont")
+    #rhs = sio.loadmat('rhs')['rhs']
 
-model = model_data['model']
-y0 = y0_data['y0']
+    model = model_data['model']
+    y0 = y0_data['y0']
 
-dim_y0_mapping = make_mapping(y0[0]) 
-lam_u_s = np.size(y0[0][0][dim_y0_mapping['lam_u']])   
-theta = y0[0][0][dim_y0_mapping['th']][0][0]    
+    dim_y0_mapping = make_mapping(y0[0]) 
+    lam_u_s = np.size(y0[0][0][dim_y0_mapping['lam_u']])   
+    theta = y0[0][0][dim_y0_mapping['th']][0][0]    
 
-constr_mapping = make_mapping(constr_data['constr'][0])
+    constr_mapping = make_mapping(constr_data['constr'][0])
 
-#Total specific to consider
-total_cons = len(model[0][0][1][0])
-
-
-#Create the M and the Bu matri foe each contigency
-nproc = int(sys.argv[3])
-
-print('running for total cons: {0} with nproc {1}'.format(cont, nproc))
-
-Ms = []
-Bu = []
-pool = mp.Pool(processes = nproc)
-ans = pool.map(parallel_newton,np.arange(total_cons))
-
-for con in ans:
-    Ms.append(con[0])
-    Bu.append(con[1])
-
-'''
-#if wanting to run serial code...
-Ms = []
-Bu = []
-start_t = time.time()
-for con_num in range(total_cons):
-    r_M,r_B = parallel_newton(con_num)
-    Ms.append(r_M))
-    Bu.append(r_B)
-t = time.time()-start_t
-print('serial time:',t)
-'''
-
-g_u = np.zeros((lam_u_s, 1));
-    
-    
-general_mapping= make_mapping(model[0][0][0][0][0])
-dims_general = model[0][0][0][0][0][general_mapping['dim']]
-dims_general_mapping = make_mapping(dims_general)
-
-#TODO: Fix naming...
-n = dims_general[0][0][dims_general_mapping['p']][0][0]
-p = y0[0][0][dim_y0_mapping['p']]
-g_u[:n] = p - constr_data['constr'][0][0][constr_mapping['up']]
-g_u[n:2*n] = -p + constr_data['constr'][0][0][constr_mapping['lp']];
+    #Total specific to consider
+    total_cons = len(model[0][0][1][0])
 
 
-Dg_u = np.concatenate((np.eye(n), -np.eye(n)))
-pars_general = model[0][0][0][0][0][general_mapping['par']]
-pars_mapping = make_mapping(pars_general)
-par_W = pars_general[0][0][pars_mapping['W']]
+    #Create the M and the Bu matri foe each contigency
+    nproc = int(sys.argv[3])
 
-temp = np.diag(y0[0][0][dim_y0_mapping['lam_u']].flatten())
-r1 = [2*par_W, Dg_u.T]
-r2 = [-temp.dot(Dg_u), -1 * np.diag(g_u.flatten())]
-Du = np.block([r1, r2])
+    print('running for total cons: {0} with nproc {1}'.format(cont, nproc))
 
-BB_nrows = dims_general[0][0][dims_general_mapping['BB_nrows']][0][0]
-BB_ncols = dims_general[0][0][dims_general_mapping['BB_ncols']][0][0]
-BB = np.zeros((BB_nrows, BB_ncols))
+    Ms = []
+    Bu = []
+    pool = mp.Pool(processes = nproc)
+    ans = pool.map(parallel_newton,np.arange(total_cons))
 
-#This shift is just keep track of where we need to update in the block matrices
-shift = 0
-for con_num in range(total_cons):
-    model_specific_i = get_model_specific(model, con_num)
-    specific_mapping = make_mapping(model_specific_i)
-    dims = model_specific_i[0][0][specific_mapping['dim']]
-    dims_mapping = make_mapping(dims)
-    BB_nrows = dims[0][0][dims_mapping['BB_nrows']][0][0]
-    BB[shift :BB_nrows + shift, : ] = Bu[con_num].toarray()
-    shift += BB_nrows
+    for con in ans:
+        Ms.append(con[0])
+        Bu.append(con[1])
 
-if total_cons == 0:
-    AA = Ms[0]
-else:
-    AA = sparse.block_diag(Ms)
-
-# Combine it all together! 
-
-'''
-    AA: Combination of all the Ms
-    Du: Primary/dual variables related to the initial physical construactions
-    BB: something in betweenn...(should be a bit more clear)
     '''
-M_newton = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
+    #if wanting to run serial code...
+    Ms = []
+    Bu = []
+    start_t = time.time()
+    for con_num in range(total_cons):
+        r_M,r_B = parallel_newton(con_num)
+        Ms.append(r_M))
+        Bu.append(r_B)
+    t = time.time()-start_t
+    print('serial time:',t)
+    '''
 
+    g_u = np.zeros((lam_u_s, 1));
+        
+        
+    general_mapping= make_mapping(model[0][0][0][0][0])
+    dims_general = model[0][0][0][0][0][general_mapping['dim']]
+    dims_general_mapping = make_mapping(dims_general)
+
+    #TODO: Fix naming...
+    n = dims_general[0][0][dims_general_mapping['p']][0][0]
+    p = y0[0][0][dim_y0_mapping['p']]
+    g_u[:n] = p - constr_data['constr'][0][0][constr_mapping['up']]
+    g_u[n:2*n] = -p + constr_data['constr'][0][0][constr_mapping['lp']];
+
+
+    Dg_u = np.concatenate((np.eye(n), -np.eye(n)))
+    pars_general = model[0][0][0][0][0][general_mapping['par']]
+    pars_mapping = make_mapping(pars_general)
+    par_W = pars_general[0][0][pars_mapping['W']]
+
+    temp = np.diag(y0[0][0][dim_y0_mapping['lam_u']].flatten())
+    r1 = [2*par_W, Dg_u.T]
+    r2 = [-temp.dot(Dg_u), -1 * np.diag(g_u.flatten())]
+    Du = np.block([r1, r2])
+
+    BB_nrows = dims_general[0][0][dims_general_mapping['BB_nrows']][0][0]
+    BB_ncols = dims_general[0][0][dims_general_mapping['BB_ncols']][0][0]
+    BB = np.zeros((BB_nrows, BB_ncols))
+
+    #This shift is just keep track of where we need to update in the block matrices
+    shift = 0
+    for con_num in range(total_cons):
+        model_specific_i = get_model_specific(model, con_num)
+        specific_mapping = make_mapping(model_specific_i)
+        dims = model_specific_i[0][0][specific_mapping['dim']]
+        dims_mapping = make_mapping(dims)
+        BB_nrows = dims[0][0][dims_mapping['BB_nrows']][0][0]
+        BB[shift :BB_nrows + shift, : ] = Bu[con_num].toarray()
+        shift += BB_nrows
+
+    if total_cons == 0:
+        AA = Ms[0]
+    else:
+        AA = sparse.block_diag(Ms)
+
+    # Combine it all together! 
+
+    '''
+        AA: Combination of all the Ms
+        Du: Primary/dual variables related to the initial physical construactions
+        BB: something in betweenn...(should be a bit more clear)
+        '''
+    M_newton = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
+
+    return M_newton
 
 
 #AB = run_sample()
