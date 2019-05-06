@@ -16,7 +16,7 @@ def run_multilevel_example():
     #sample_constr_count = 5
 
     #solve the system
-    os.system('mpirun -n {} python -u multilevel_example_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count, fullParallel, newtonParallel, ))
+    os.system('mpirun -n {} python -u multilevel_example_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count, fullParallel, newtonParallel, newton_nproc))
 
     #solver_multilevel.solve(sample_bus_count, sample_constr_count)
 
@@ -28,7 +28,7 @@ def multilevel_check_residuals():
     #sample_constr_count = 5
 
     #solve the system
-    os.system('mpirun -n {} python -u multilevel_example_residuals_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count))
+    os.system('mpirun -n {} python -u multilevel_example_residuals_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count, fullParallel, newtonParallel, newton_nproc))
 
     #solver_multilevel.solve(sample_bus_count, sample_constr_count)
 
