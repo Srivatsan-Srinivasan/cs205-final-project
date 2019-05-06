@@ -40,7 +40,7 @@ if __name__ == '__main__':
     #global sample_constr_count
 
     sample_bus_count = 2224
-    sample_constr_count = 5
+    sample_constr_count = 6
 
     fullParallel = 'false'
     newtonParallel = 'false'
