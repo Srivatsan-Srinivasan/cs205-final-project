@@ -9,8 +9,7 @@ Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
 '''
 import logging
 from mpi4py import MPI
-
-#from .utils import get_filepaths
+'''
 from utils import get_filepaths
 from utils import load_filepaths
 from utils import calculate_residuals
@@ -22,7 +21,6 @@ from solver_utils import multigrid_PARALLEL
 from solver_utils import permute_sparse_matrix
 from solver_utils import split_newton_matrix
 from solver_utils import local_schurs
-
 from solver_utils import multigrid_full_parallel
 '''
 from .utils import get_filepaths
@@ -36,9 +34,8 @@ from .solver_utils import multigrid_PARALLEL
 from .solver_utils import permute_sparse_matrix
 from .solver_utils import split_newton_matrix
 from .solver_utils import local_schurs
-
 from .solver_utils import multigrid_full_parallel
-'''
+
 def _load_data(bus_count, constr_count):
     '''
     Given number of busses and number of power network constraints, loades the MATLAB matrices.
