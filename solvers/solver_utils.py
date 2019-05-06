@@ -585,7 +585,7 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
      #   print("Local input %d has %s" % (iproc, str(local_inputs)))
   #      print(local_inputs)
     inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
-                             local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
+                             local_inputs[2], B, F, f, True, niter = 10, num_restarts = 10, 
                              tol = 1e-6)
   #      logging.info("I am proc %d and I've finishing my processing my results are %s" % (iproc, str(inner_soln)))    
        
@@ -640,7 +640,9 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     
     check1 = Ar2[:, start_c:]
     check2 = Ar2[start_r:, :]
-    assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
+    diff = sparse.linalg.norm(check1 - check2.T)
+    print("Diff is %d" % diff )
+    assert(diff < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
     #to_split_arr.append(Cp)
@@ -685,16 +687,15 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     (uli, yli) = local_soln
     combined_local = np.concatenate(local_soln)
 
-    '''
+    nproc = MPI.COMM_WORLD.Get_size()
     if(iproc == 0):
-        left_bound = - len(yli)
-        right_bound = F.shape[1]
+        left_bound = 0
+        right_bound = len(gi)
     else:
-    '''
-    
-    left_bound = (iproc) *len(combined_local)
-    right_bound = (iproc + 1) * len(combined_local)
- #   print("Left bound is %d and right is %d" % (left_bound, right_bound))
+        right_bound = F.shape[1] - (nproc - iproc - 1) *len(combined_local)
+        left_bound = F.shape[1] -(nproc - iproc) * len(combined_local)
+    print("Left bound is %d and right is %d" % (left_bound, right_bound))
+    print("B: %s, f: %s, F; %s, cl: %s" %(str(B.shape), str(f.shape), str(F.shape), str(combined_local.shape)))
     ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
     #print("U10 shape is %s" % str(u10))
  #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
@@ -747,7 +748,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     if(yguess == None):
         yguess = Pr
         if(r is not None):
-            yguess = np.reshape(Pr, yguess.shape)
+            yguess = np.reshape(Pr, gi.shape)
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
         if(nproc == 1):
@@ -757,8 +758,11 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             #Do the dot product
             adjust_left = interface_dotProd(interface_y, Hips)
             if(add_back_in):
-                adjust_left += yguess[f_len:]
+                adjust_left = adjust_left + (Hips[0].todense() * yguess[-g_len:])
+            adjust_left = np.reshape(adjust_left, gi.shape)
         if(useSchurs):
+            diff2 = gi - adjust_left
+            print("Shape of Aicut %s and Bicut is %s" % (str(Aicut.shape), str(diff2.shape)))
             yguess_new = sparse.linalg.gmres(Aicut, gi - adjust_left, Pr, restart = None, M=Mcut)[0]
             
         else:
@@ -778,7 +782,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
         interface_y = communicate_interface(iproc, nproc, yguess)
         t = interface_dotProd(interface_y, Hips)
         if(add_back_in):
-            t += yguess[f_len:]
+            t += Hips[0].todense() * yguess[-g_len:]
 
     else:
         t = np.zeros_like(gi)
