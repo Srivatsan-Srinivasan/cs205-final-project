@@ -1,14 +1,5 @@
-# cs205-final-project
-This repository will be used to commit code necessary for the final project of CS205 course. Contributors are
+The file newton.py will return the M_Newton sparse matrix. The number of buses, continguencies, and processors must be specified in order to run the file. An example of a command to run the file is shown below:
 
-1. Srivatsan Srinivasan
+python3 newton.py 2224 6 6
 
-2. Manish Reddy Vuyyuru 
-
-3. Aditya Karan 
-
-4. Cory Williams
-
-* Google slides for the proposal : https://docs.google.com/presentation/d/1oGa-gHbte9kbHfcSGOF94_0M-nd7p2r2Ky5b_dz2hU8/edit?usp=sharing
-
-* Overleaf link for the design presentation : https://www.overleaf.com/4973698375xwjqbstbnfxp
+This will product the M_Newton matrix for 2224 buses and 6 contigencies, using 6 processors. 
