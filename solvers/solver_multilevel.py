@@ -17,6 +17,7 @@ from .utils import calculate_residuals
 from scipy import sparse
 
 from .solver_utils import construct_NewtonBDMatrix
+from .solver_utils import construct_NewtonBDMatrix_PARALLEL
 from .solver_utils import permute_NewtonBDMatrix
 from .solver_utils import multigrid_PARALLEL
 from .solver_utils import permute_sparse_matrix
@@ -50,7 +51,7 @@ def _load_data(bus_count, constr_count):
 
     return model_data, rhs_data, y0_data, constr_data
 
-def _construct_newton(model_data, rhs_data, y0_data, constr_data):
+def _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel, newton_nproc):
     '''
     Given the model, Y0 variables (per paper) variables, constraint data file matrix
     the newton block diagonal matrix per paper.
@@ -67,9 +68,17 @@ def _construct_newton(model_data, rhs_data, y0_data, constr_data):
 
     #construct newton block diagonal matrix per paper
     logging.info('constructing newton matrix ...')
-
-    newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
-
+    import time
+    startTime = time.time()
+    if newtonParallel:
+        logging.info('construct in parallel mode')
+        newton_matrix = construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, newton_nproc)
+    else:
+        logging.info('construct in serial mode')
+        newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
+    endTime = time.time()
+    print('newton construct took {}s'.format(endTime - startTime))
+    raise ValueError
     inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
 
     newton_matrix = permute_sparse_matrix(newton_matrix, inds[0], inds[1])    
@@ -120,7 +129,7 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
         else:
             return None
     else:
-        logging.info("solving bottom level in single node")        
+        logging.info("solving bottom level in multiple nodes")        
         #if iproc == 0:
         soln = multigrid_full_parallel(iproc, combined, inds, nrows, model_data)    
         if(iproc == 0):
@@ -130,7 +139,7 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
 
         
-def solve(bus_count, constr_count, save=False, fullParallel = False):
+def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False, newton_nproc=None):
 
     # load data, construct newton matrix, solve newton step
     nproc = MPI.COMM_WORLD.Get_size()
@@ -144,7 +153,7 @@ def solve(bus_count, constr_count, save=False, fullParallel = False):
     if iproc == 0:
         #master node
         model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
-        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data)
+        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel = newtonParallel, newton_nproc=newton_nproc)
 
     combined = _descend_level(iproc, splits)
 

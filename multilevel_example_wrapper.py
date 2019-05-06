@@ -2,7 +2,7 @@ import sys
 from solvers import solver_multilevel
 
 def run_multilevel_example(bus_count, constr_count):
-	soln = solver_multilevel.solve(bus_count, constr_count)
+	soln = solver_multilevel.solve(bus_count, constr_count, True, True, None)
 	if soln is not None:
 		#worker nodes return None, master node returns the solutions
 		return soln

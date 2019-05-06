@@ -39,17 +39,17 @@ if __name__ == '__main__':
     #global sample_bus_count
     #global sample_constr_count
 
-    sample_bus_count = 189
+    sample_bus_count = 2224
     sample_constr_count = 5
 
     #run_multilevel_example_filled = run_multilevel_example(sample_bus_count, sample_constr_count)
     #multilevel_check_residuals_filled = multilevel_check_residuals(sample_bus_count, sample_constr_count)
 
-    profile_utils.profile_funcalls(run_multilevel_example)
-    profile_utils.viz_funcalls()
+    #profile_utils.profile_funcalls(run_multilevel_example)
+    #profile_utils.viz_funcalls()
 
-    profile_utils.profile_callgraph(run_multilevel_example)
-    profile_utils.profile_memory(run_multilevel_example)
+    #profile_utils.profile_callgraph(run_multilevel_example)
+    #profile_utils.profile_memory(run_multilevel_example)
     profile_utils.profile_time(run_multilevel_example)
     #profile_utils.check_residuals(run_multilevel_example, sample_bus_count, sample_constr_count)
-    multilevel_check_residuals()
+    #multilevel_check_residuals()
