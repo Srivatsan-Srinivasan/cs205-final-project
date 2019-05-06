@@ -144,9 +144,11 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
 
         
-def solve(bus_count, constr_count, save=False, fullParallel = False, grouping = "grouping"):
+def solve(bus_count, constr_count, save=False, fullParallel = False, grouping = None):
 
     # load data, construct newton matrix, solve newton step
+    if(grouping == None):
+        grouping = "grouped" if fullParallel else "standard"
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
     inode = MPI.Get_processor_name()
