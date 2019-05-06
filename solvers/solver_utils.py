@@ -684,12 +684,14 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
     combined_local = np.concatenate(local_soln)
-'''
+
+    '''
     if(iproc == 0):
         left_bound = - len(yli)
         right_bound = F.shape[1]
     else:
-        '''
+    '''
+    
     left_bound = (iproc) *len(combined_local)
     right_bound = (iproc + 1) * len(combined_local)
  #   print("Left bound is %d and right is %d" % (left_bound, right_bound))
