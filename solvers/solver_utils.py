@@ -49,15 +49,16 @@ def get_model_specific(model_data, constr_num):
     '''Get the constraint specific model information'''
     return model_data[0][0][1][0][constr_num]
 
-def parallel_newton(con_num):
+def construct_NewtonBDMatrix_PARALLEL_worker(con_num):
     '''
-    Given a contingency number from the construct_NewtonBDMatrix function, return the r_M/r_B deconstruction using multiprocessing
+    Given a contingency number from construct_NewtonBDMatrix fn., returns the corresponding r_M, r_B deconstruction per report/website.
 
     Args:
         con_num (int): the index of the contingency being looked at
+
     Returns:
-        r_M: the sparse matrix M that is deconstructed from A
-        r_B: the sparse matrix B that is deconstructed from B
+        r_M (scipy.sparse matrix): the sparse matrix M that is deconstructed from A
+        r_B (scipy.sparse matrix): the sparse matrix B that is deconstructed from B
     '''
     #set local variables to global variables
     model = MODEL
@@ -67,13 +68,13 @@ def parallel_newton(con_num):
     theta = THETA
     constr_mapping = CONSTR_MAPPING
     constr_data = CONSTR_DATA
+    #set local variables to global variables
 
     model_specific = get_model_specific(model, con_num)
     info_mapping= make_mapping(model_specific)
     dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
     nieq = model_specific[0][0][info_mapping['dim']][0][0][dim_mapping['nineq']][0][0]   
-
-    # TODO: should use a mapping for A2, D2 etc...
+    
     A2 = model_specific[0][0][8] 
     D2 = model_specific[0][0][9]
     B =  model_specific[0][0][5]    
@@ -112,31 +113,29 @@ def parallel_newton(con_num):
     r_B = [r1_B,r2_B,r3_B]
 
     r_B = sparse.csr_matrix(np.block(r_B))
-    
-    #return None
 
     return r_M,r_B
 
 def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0):
     '''
-    Given the model, Y0 variables (per paper), constraint data file matrix, constructs
-    the newton block diagonal matrix per paper.
+    Given the model, Y0 variables (per report/website), constraint data file matrix, number of processors
+    to use in multiprocessing, constructs the newton block diagonal matrix per report/website using pyMP
 
     Args:
         model_data (scipy.sparse or numpy matrices): loaded model data file matrix
-        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per report/website
         constr_data (scipy.sparse or numpy matrices): constraint data file matrix
+        nproc (int): number of processors to use in multiprocessing
 
     Returns:
-        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per report/website
     '''
 
-    #model = model_data['model']
+    #set global variables to local variables
     model = model_data
     y0 = y0_data
     global MODEL 
-    MODEL = model
-    #y0 = y0_data['y0']
+    MODEL = model    
     global Y0 
     Y0 = y0
 
@@ -156,41 +155,37 @@ def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0)
 
     global CONSTR_DATA
     CONSTR_DATA = constr_data
-
+    #set global variables to local variables
 
     #Total specific to consider
     total_cons = len(model[0][0][1][0])
 
-
     #Create the M and the Bu matri foe each contigency
+
     if nproc == 0:
         nproc = total_cons
 
     Ms = []
     Bu = []
     pool = mp.Pool(processes = nproc)
-    ans = pool.map(parallel_newton,np.arange(total_cons))
+    ans = pool.map(construct_NewtonBDMatrix_PARALLEL_worker,np.arange(total_cons))
 
     for con in ans:
         Ms.append(con[0])
         Bu.append(con[1])
 
-
     del MODEL, Y0, DIM_Y0_MAPPING, LAM_U_S, THETA, CONSTR_MAPPING
 
     g_u = np.zeros((lam_u_s, 1));
-        
-        
+                
     general_mapping= make_mapping(model[0][0][0][0][0])
     dims_general = model[0][0][0][0][0][general_mapping['dim']]
     dims_general_mapping = make_mapping(dims_general)
-
-    #TODO: Fix naming...
+    
     n = dims_general[0][0][dims_general_mapping['p']][0][0]
     p = y0[0][0][dim_y0_mapping['p']]
     g_u[:n] = p - constr_data[0][0][constr_mapping['up']]
     g_u[n:2*n] = -p + constr_data[0][0][constr_mapping['lp']];
-
 
     Dg_u = np.concatenate((np.eye(n), -np.eye(n)))
     pars_general = model[0][0][0][0][0][general_mapping['par']]
@@ -206,7 +201,7 @@ def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0)
     BB_ncols = dims_general[0][0][dims_general_mapping['BB_ncols']][0][0]
     BB = np.zeros((BB_nrows, BB_ncols))
 
-    #This shift is just keep track of where we need to update in the block matrices
+    #shift to track update locations in block matrices
     shift = 0
     for con_num in range(total_cons):
         model_specific_i = get_model_specific(model, con_num)
@@ -222,28 +217,25 @@ def construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, nproc=0)
     else:
         AA = sparse.block_diag(Ms)
 
-    # Combine it all together! 
+    #combine it all together!
+    #AA: Combination of all the Ms
+    #Du: Primary/dual variables related to the initial physical constructions
+    #BB: All the stuff in between
+    newton_matrix = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
 
-    '''
-        AA: Combination of all the Ms
-        Du: Primary/dual variables related to the initial physical construactions
-        BB: something in betweenn...(should be a bit more clear)
-        '''
-    M_newton = sparse.bmat([[AA, sparse.csc_matrix(BB)], [sparse.csc_matrix(BB).T, sparse.csc_matrix(Du)]])
-
-    return M_newton
+    return newton_matrix
 
 
 def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
     '''
-    Given the model, Y0 variables (per paper), constraint data file matrix, constructs
-    the newton block diagonal matrix per paper.
+    Given the model, Y0 variables (per report/website), constraint data file matrix, constructs
+    the newton block diagonal matrix per report/website.
     Args:
         model_data (scipy.sparse or numpy matrices): loaded model data file matrix
-        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per report/website
         constr_data (scipy.sparse or numpy matrices): constraint data file matrix
     Returns:
-        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per report/website
     '''
 
     dim_y0_mapping = make_mapping(y0_data[0])
@@ -350,6 +342,18 @@ def construct_NewtonBDMatrix(model_data, y0_data, constr_data):
     return(newton_matrix)
 
 def get_specific_dim(model_data, cons_num):    
+    '''
+    Given the model data and the constraint number, returns specific information about
+    the dim per report/website.
+    
+    Args:
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix
+        cons_num (int): constraint number
+
+    Returns:
+        dims (int): number of dims
+        dim_mapping (dict): equivalent dict mapping about the requested specific information
+    '''
     model_specific = get_model_specific(model_data, cons_num)
     info_mapping= make_mapping(model_specific)
     dim_mapping = make_mapping(model_specific[0][0][info_mapping['dim']][0])
@@ -357,14 +361,41 @@ def get_specific_dim(model_data, cons_num):
     return((dims, dim_mapping))
 
 def get_num_cont(model_data):
+    '''
+    Given the model data returns the number of contengencies.    
+    
+    Args:
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix    
+
+    Returns:
+        num_cont (int): number of contengencies        
+    '''
+
     return(len(model_data[0][0][1][0]) - 1)
 
 def permute_NewtonBDMatrix(model_data, method = "standard"):
-    '''The algorithm here is to permute to get the same type of variables together. 
-    Roughtly speaking instead of grouping by contingency directly we want to group by 
-    theta variables, lambda variables etc. This somehow gives us a very diagonal 
-    B0 matrix which is really easy to work with. 
     '''
+    Given the model data, and a permutation method to use,
+    intelligently permutes the newton matrix to optimize runtime.
+    
+    Args:
+        model_data (scipy.sparse or numpy matrices): loaded model data file matrix
+        method (str): string defining a valid permutation method to employ
+
+    Returns:
+        (list of numpy arrays): new ordered indices defining arrangement of permuted matrix
+        (list of numpy arrays): new orderings defining shift to track updates (???)
+
+    available method types:
+    standard: (group lambdas together and then group (nu/theta))
+    grouped: (group all lambdas together than all nu and then all theta)
+    '''
+
+    #The algorithm here is to permute to get the same type of variables together. 
+    #Roughtly speaking instead of grouping by contingency directly we want to group by 
+    #theta variables, lambda variables etc. This somehow gives us a very diagonal 
+    #B0 matrix which is really easy to work with. 
+    
     if(method not in ['standard', 'grouped']):
         raise ValueError("Invalid method supplied")
     # method types: 
@@ -521,7 +552,22 @@ def repermute(y0, new_col_inds):
 
 def multigrid(A, rhs, current_level, terminal_level,
               pMethod = 'identity', nMethod = 'given', pInput = None, nInput = None ):
-      
+    ''' 
+    Implemented the multigrid procedure per report/website.
+
+    Args:
+        A (scipy.sparse or numpy matrices): Newton step matrix to be solved
+        rhs (scipy.sparse or numpy matrices): RHS variables per report/website
+        current_level (int): current descent level in the multigrid procedure
+        terminal_level (int): terminal descent level in the multigrid procedure
+        pMethod (string): valid permutation method for newton step matrix
+        nMethod (string): valid method for dealing with nInput
+        pInput (scipy.sparse or numpy matrices): pInput to handle per pMethod
+        nInput (scipy.sparse or numpy matrices): nInput to handle per nMethod
+
+    Returns:
+        y0 (scipy.sparse matrix): solution to the newton step problem per report/website        
+    '''
     if(pMethod == 'given'):
         if(len(pInput) != terminal_level - current_level):
             raise ValueError("Needs to be consistent")
@@ -603,7 +649,23 @@ def multigrid(A, rhs, current_level, terminal_level,
         return y0
 
 def split_newton_matrix(A, rhs, nrows, ncont, nprocess, model, inds):
+    ''' 
+    When given the partition width for the matrix and various pieces of information about
+    the newton step matrix, partitions it.
 
+    Args:
+        A (scipy.sparse or numpy matrices): Newton step matrix to be solved
+        rhs (scipy.sparse or numpy matrices): RHS variables per report/website
+        nrows (int): partition width for the ordered newton step matrix
+        ncont (int): number of contengencies
+        nprocess (int): number of processors
+        model (scipy.sparse or numpy matrices): model data file matrix
+        inds (list or numpy array): ordering of indices in newton step matrix
+
+    Returns:
+        to_send (nested list or numpy array of scipy.sparse matrices): partitions segements of the initial A matrix to send
+        As (list of scipy.sparse matrices): corresponding reconstructed sub-A matrices from partition segments to send
+    '''
     B0 = A[:nrows, :nrows]
     F0 = A[:nrows, nrows:]
     E0 = A[nrows:, :nrows]
@@ -681,14 +743,26 @@ def split_newton_matrix(A, rhs, nrows, ncont, nprocess, model, inds):
     return(to_send, As)
 
 def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None):
-    
+    ''' 
+    Implemented a partially parallelized version of the multigrid procedure per report/website.
+
+    Args:
+        iproc (int): MPI processor id
+        combined (scipy.sparse or numpy matrices): combined local schurs components when descending level
+        inds (list of numpy arrays): new ordered indices defining arrangement of permuted matrix
+        nrows (list of numpy arrays): new orderings defining shift to track updates (???)
+        split_solve (None): unused variable in this partially parallelized implementation
+        res (None): unused variable in this partially parallelized implementaiton
+
+    Returns:
+        y0 (scipy.sparse matrix): solution to the newton step problem per report/website        
+    '''
     newA= combined[0][0].copy()
     newG = combined[0][1].copy()
     for i in range(1, len(combined)):
         newA += combined[i][0]
         newG += combined[i][1]
-    otherInfo = [(x[3], x[4], x[5]) for x in combined]
-    #print("Going local route... with %d" % iproc)
+    otherInfo = [(x[3], x[4], x[5]) for x in combined]    
 
     cut = nrows[1]
     B0 = newA[:cut, :cut]
@@ -701,43 +775,40 @@ def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None)
     f0 = newG[:cut]
     g0 = newG[cut:]
 
-    #print("Finished split8ing with %d %s" % (iproc, str(B0.shape)))
+    
     # Direct Solve via ILU
     
     ILU = sparse.linalg.spilu(B0 + 1e-4 * sparse.eye(B0.shape[0]))
     (L1, U1) = (ILU.L, ILU.U)
-    #logging.info("Finishing ILU")
+    #Finishing ILU
     
     G1 = sparse.linalg.spsolve_triangular(U1.T, (E0.T).todense())
     W1 = sparse.linalg.spsolve_triangular(L1, F0.todense())
     A2 = C0 - G1.T * W1
-    #logging.info("Fininsihed A2")
+    #Finished A2
     
-    # Backsolve
+    #Backsolve
     f1_prime = sparse.linalg.spsolve_triangular(L1, f0)
     f1_prime = f1_prime.reshape(len(f1_prime), 1)
     inner = G1.T * f1_prime
     g1_prime = g0 - inner
-    #logging.info("Finishing g1_prime")
+    #Finishing g1_prime
     # More backsolve
     y1 = spsolve(A2, g1_prime)
-    #logging.info("Finishing direct solve")
+    #Finished direct solve
     y1 = y1.reshape(len(y1), 1)
     u1 = sparse.linalg.spsolve_triangular(
     U1, (f1_prime.reshape(len(f1_prime), 1) - W1 * y1), False)
-    #logging.info("Finished backsub")
+    #Finished backsub
     u1 = u1.reshape(len(u1), 1)
     y1 = np.concatenate((u1, y1))
-    #logging.info("Starting GMRES")
-    #y1 = sparse.linalg.gmres(newA, newG)[0]
-    #logging.info("Ending GMRES")
-    #y1 = y1.reshape(len(y1), 1)
+    
     B = sparse.block_diag([combined[i][3] for i in range(0, len(combined)) ])
     F = sparse.vstack([combined[i][4] for i in range(0, len(combined)) ])
     f = np.vstack([combined[i][5] for i in range(0, len(combined)) ])
-    #logging.info("Finsihed constructing")
+    #finished constructing
     u0 = sparse.linalg.spsolve_triangular(B, f  - F * y1 , False )
-    #logging.info("Finsihing backsolve")
+    #finishing backsolve
     u0 = u0.reshape(len(u0), 1)
     y0 = np.concatenate((u0, y1))
     res = repermute(y0, inds[1])
@@ -746,6 +817,16 @@ def multigrid_PARALLEL(iproc, combined, inds, nrows, split_solve=None, res=None)
 
 
 def local_schurs(inputs):
+    ''' 
+    Implements the worker logic for distributed calculation of the local schurs components 
+    per report/webiste.
+
+    Args:
+        inputs (scipy.sparse or numpy matrix): worker split for calculation of the local schurs
+
+    Returns:
+        (list of scipy.sparse or numpy matrices): result of local schurs components in workers        
+    '''
     (B, F, E, C, f, g, u) = inputs
     A1_local = C - E * sparse.diags(1/B.diagonal()) * F
     g1_local = g - E * sparse.diags(1/B.diagonal()) * f
@@ -755,6 +836,21 @@ def local_schurs(inputs):
     
     
 def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=None, res=None):
+    ''' 
+    Implemented a fully parallelized version of the multigrid procedure per report/website.
+
+    Args:
+        iproc (int): MPI processor id
+        combined (scipy.sparse or numpy matrices): combined local schurs components when descending level
+        inds (list of numpy arrays): new ordered indices defining arrangement of permuted matrix
+        nrows (list of numpy arrays): new orderings defining shift to track updates
+        model (scipy.sparse or numpy matrices): loaded model data file matrix
+        split_solve (None): initialization of the iterable for distributed calculations
+        res (None): initialization of the solution to the newton step problem per report/website
+
+    Returns:
+        res (scipy.sparse matrix): solution to the newton step problem per report/website
+    '''
     if(iproc == 0):
         ncont = get_num_cont(model)
         newA= combined[0][0].copy()
@@ -767,13 +863,10 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
     
     local_inputs = MPI.COMM_WORLD.scatter(split_solve, root=0)
     (B, F, f) = local_inputs[-1]
-     #   print("Local input %d has %s" % (iproc, str(local_inputs)))
-  #      print(local_inputs)
+     
     inner_soln = outer_solver_wrapper(iproc, local_inputs[0], local_inputs[1][0], local_inputs[1][1], 
                              local_inputs[2], B, F, f, (iproc == 0), niter = 10, num_restarts = 10, 
-                             tol = 1e-6)
-  #      logging.info("I am proc %d and I've finishing my processing my results are %s" % (iproc, str(inner_soln)))    
-       
+                             tol = 1e-6)       
         
     combined2 = MPI.COMM_WORLD.gather(inner_soln, root = 0)
     if(iproc == 0):
@@ -787,6 +880,23 @@ def multigrid_full_parallel(iproc, combined, inds, nrows, model, split_solve=Non
         return(res)
 
 def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= True):
+    ''' 
+    Implemented the distributed data calc at the terminal level per report/website.    
+
+    Args:
+        model (scipy.sparse or numpy matrices): loaded model data file matrix
+        A (scipy.sparse or numpy matrix): newton step matrix to be solved
+        rhs (scipy.sparse or numpy matrix): RHS variables per report/website
+        num_cont (int): number of contengencies
+        otherData (list of scipy.sparse or numpy matrices): other data to be 
+        passed through the calc
+        moveZero (boolean): insert a 0 into the other data to be passed through
+        the calc
+
+    Returns:
+        grouped (list of tuples of scipy.sparse or numpy matrices): grouped matrices
+        of results from split_to_distributed.
+    '''
     (Bs, rhs, Hps) = split_to_distributed(model, A, rhs, num_cont)
     if(otherData is not None):
         if(moveZero == True):
@@ -797,12 +907,20 @@ def distributed_data_calc(model, A, rhs, num_cont, otherData = None, moveZero= T
     return(grouped)
 
 def split_to_distributed(model, Ar, rhsr, num_cont):
-    '''Takes a model and a reduced matrx, reorders it and then comes up with a split'''
+    ''' 
+    Takes model data and a reduced matrix, reorders it and then comes up with a split.
+
+    Args:
+        model (scipy.sparse or numpy matrices): loaded model data file matrix
+        Ar (scipy.sparse or numpy matrix): reduced matrix of the newton step matrix pre report/website
+        rhsr (scipy.sparse or numpy matrix): reduced RHS variables per report/website
+        num_cont (int): number of contengencies
+
+    Returns:
+        (tuple of scipy.sparse or numpy matrices): tuples of matrices that form the split after reordering
+    '''
     Ar2 = Ar
     (cols, rows, inds) = find_regrouping(model)
-    #(cols, rows, inds) = permute_NewtonBDMatrix(model)
-#    Ar2 = permute_sparse_matrix(Ar, np.concatenate(cols), np.concatenate(rows))
-#    rhsr = rhsr[np.concatenate(cols)]
 
     to_split_arr = []
     rhs_split_arr = []
@@ -825,8 +943,6 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     assert(sparse.linalg.norm(check1 - check2.T) < 1e-6)
     Cp = Ar2[start_r:, start_c:]
     rhs_left = (np.zeros((0, rhsr.shape[1])), rhsr[start_r:])
-    #to_split_arr.append(Cp)
-    #rhs_split_arr.append(rhs_left)
     
     to_split_arr.insert(0, Cp)
     rhs_split_arr.insert(0, rhs_left)
@@ -834,45 +950,74 @@ def split_to_distributed(model, Ar, rhsr, num_cont):
     Hps_inner = []
     start_c = 0
     for i in range(0, num_cont + 1):
-        #(i_col) = (len(cols[i]))
         th_len = len(inds['deltaTheta'][i])
         th_nu = len(inds['deltaNu'][i])
         Hps_inner.append(
             Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu])
         Hps_outer.append(
             [Ar2[start_r:, start_c + th_len: start_c + th_len + th_nu]])
-    #Hps_outer.append(Hps_inner)
     Hps_outer.insert(0, Hps_inner)
-   # print("Len is %d" % len(Hps_outer[0]))
     return(to_split_arr, rhs_split_arr, Hps_outer)
 
 
 def fwd_back(b, L, U):
-    '''SImple forward bck sub'''
+    '''
+    Convenience function implementing the usual forward back substitution. 
+
+    Args:
+        b (scipy.sparse or numpy matrix): the matrix to perform the forward backward on
+        L (scipy.sparse or numpy matrix): the lower triangular matrix in the forward back
+        U (scipy.sparse or numpy matrix): the upper triangular matrix in the forward back
+
+    Returns:
+        x (scipy.sparse or numpy matrix): the result of the forward back substitution
+    '''
     inter = sparse.linalg.spsolve_triangular(L, b)
     x = sparse.linalg.spsolve_triangular(U, inter, False)
     return(x)
 
 
 def get_S(L, U, num=33):
-    '''Handle getting Schur complement from L, U
-    TODO Actually do it - for now just return'''
+    '''
+    Convenience function that calculates the schur component from L, U
+
+    Args:
+        L (scipy.sparse or numpy matrix): the lower triangular matrix
+        U (scipy.sparse or numpy matrix): the upper triangular matrix
+        num (int): index valuation defining the partition for L, U matrices
+
+    Returns:
+        (tuple of scipy.sparse or numpy matrices): schur component from L, U
+    '''
     return(L[num:, num:], U[num:, num:])
 
 
 def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
-    
+    '''
+    outer wrapper for the main gmres solver
+
+    Args:
+        iproc (int): MPI processor int
+        Ai (scipy.sparse or numpy matrix): Ai variable for gmres per report/website
+        fi (scipy.sparse or numpy matrix): fi variable for gmres per report/website
+        gi (scipy.sparse or numpy matrix): gi variable for gmres per report/website
+        Hips (scipy.sparse or numpy matrix): Hips variable for gmres per report/website
+        B (scipy.sparse or numpy matrix): B variable for gmres per report/website
+        F (scipy.sparse or numpy matrix): F variable for gmres per report/website
+        f (scipy.sparse or numpy matrix): f variable for gmres per report/website
+        useSchurs (boolean): boolean to use or not to use schurs in gmres solver
+        yguess (scipy.sparse or numpy matrix): the current best guess for y matrix
+        niter (int): number of iterations to use for the main gmres solver
+        num_restarts (int): number of restarts to use for the main gmres solver
+        tol (float): tolerance for the main gmres solver
+
+    Returns:
+        (tuple of scipy.sparse or numpy matrices): solutions from gmres solver
+    '''
     local_soln = gmres_solver_wrapper(Ai, fi, gi, Hips,useSchurs, yguess=yguess, niter=niter, 
                                          num_restarts=num_restarts, tol=tol)
     (uli, yli) = local_soln
     combined_local = np.concatenate(local_soln)
-    #(B, F, f) = otherData
-    
- #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
-  #  print("F shape %s, combined_local shape %s, B shape, %s, F shape %s" %(
-#	str(F.shape), str(combined_local.shape), str(B.shape), str(f.shape)))
-   
-#    iproc = MPI.COMM_WORLD.Get_rank()
 
     if(iproc == 0):
         left_bound = - len(yli)
@@ -880,55 +1025,66 @@ def outer_solver_wrapper(iproc, Ai, fi, gi, Hips, B, F, f,  useSchurs, yguess = 
     else:
         left_bound = (iproc - 1) *len(combined_local)
         right_bound = (iproc) * len(combined_local)
- #   print("Left bound is %d and right is %d" % (left_bound, right_bound))
+
     ul0 = sparse.linalg.spsolve_triangular(B, f.reshape(len(f), 1) - F[:, left_bound:right_bound] * combined_local, False)
-    #print("U10 shape is %s" % str(u10))
- #   u0 = sparse.linalg.spsolve_triangular(U0, (f0_prime - W0 * y0), False)
+
     u10 = ul0.reshape(len(ul0), 1)
-  #  print("u10 shape is %s" %  str(u10.shape))
+
     return((u10, combined_local))
 
 
 def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10, num_restarts = 10, tol = 1e-6):
-    '''Distributed gmres solver'''
+    '''
+    distributed gmres solver
+
+    Args:
+        Ai (scipy.sparse or numpy matrix): Ai variable for gmres per report/website
+        fi (scipy.sparse or numpy matrix): fi variable for gmres per report/website
+        gi (scipy.sparse or numpy matrix): gi variable for gmres per report/website
+        Hips (scipy.sparse or numpy matrix): Hips variable for gmres per report/website
+        useSchurs (boolean): boolean to use or not to use schurs in gmres solver
+        yguess (scipy.sparse or numpy matrix): the current best guess for y matrix
+        niter (int): number of iterations to use for the main gmres solver
+        num_restarts (int): number of restarts to use for the main gmres solver
+        tol (float): tolerance for the main gmres solver
+
+    Returns:
+        (tuple of scipy.sparse or numpy matrices): combined f and g components of gmres result
+    '''
+    
     nproc = MPI.COMM_WORLD.Get_size()
     iproc = MPI.COMM_WORLD.Get_rank()
     if(len(fi)):
         combined = np.concatenate((fi, gi))
     else:
         combined = gi
-    #TODO: Need to update to match matlab better
+    
     thresh = None
     if((Ai.diagonal()).prod() == 0):
         thresh = 0
         
     (L, U, L_inner, U_inner, r) = (None, None, None, None, None)
-    #FIXME: Should actually make this use ILU - need to coorespond to matlab somehow...
+    
     if(useSchurs):
-      #  ILU = sparse.linalg.spilu(Ai)
-       # (L, U) = (ILU.L, ILU.U)
-        #(L_inner, U_inner) = get_S(L, U, len(fi))
-        #r = fwd_back(combined, L, U)
+
         r = sparse.linalg.gmres(Ai, combined)[0]
     (Hi, dx, Bi, Hi) = (None, None, None, None)
      
-  #  yguess = scipy.sparse.linalg.lsqr(Hi, gi.flatten()) 
+  
     if(yguess == None):
         yguess = np.zeros_like(gi)
         if(r is not None):
             yguess = np.reshape(r, yguess.shape)
     for count in range(0, num_restarts):
         '''Do this communcation part for number of iteration'''
-        #print("Adjusted left for %d at num_restart:%d is %s" % (iproc, count, st)
+        
         if(nproc == 1):
             adjust_left = np.zeros_like(yguess)
         else:
             interface_y = communicate_interface(iproc, nproc, yguess)
             #Do the dot product
             adjust_left = interface_dotProd(interface_y, Hips)
-         #   print("Adjusted left for %d at rest %d is %s" % (iproc, count, str(adjust_left)))
-          #  print("New rhs for %d at rest %d is %s" % (iproc, count, str(gi - adjust_left)))
-	#print("Adjusted left for $d at num_res:$d is %s" % (irpoc, count, str(adjust_left)
+         
         if(useSchurs):
             Pr = r[len(fi):]
             yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
@@ -941,9 +1097,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
         
         yguess = np.reshape(yguess_new, yguess.shape)    
-        #Alwayts stop if the residual keeps on going down
-        #if(residual < tol):
-         #   break
+        
     
     #Now commmunicate what's left
     if(nproc != 1):
@@ -967,50 +1121,83 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             combined = np.concatenate((fi, gi))
         else:
             combined = gi
-    #    combined = np.concatenate((fi, gi.flatten()))
+    
         combined_soln = sparse.linalg.gmres(Ai, combined)[0].reshape(len(combined), 1)
     return(combined_soln[:len(fi)], combined_soln[len(fi):])
-        
-#gmres_solver_wrapper(newA, np.zeros((0, 1)), newG, [], True)
     
     
 def communicate_interface(iproc, nproc, toSend, useMPI = True):
+    '''
+    convenience function for communicating interface variables
+
+    Args:
+        iproc (int): MPI processor id
+        nproc (int): procs for communication interface
+        toSend (scipy.sparse matrix or numpy matrice): data to be broadbast
+        useMPI (boolean): boolean to determine whether to use MPI when sending data
+
+    Returns:
+        (scipy.sparse or numpy matrix): return result from the communicate interface
+    '''
     if(not useMPI):
         return([np.zeros_like(toSend)])
     from_other_to_root = toSend
     if(iproc == 0):
         from_other_to_root = None
     cont_to_power_injection = MPI.COMM_WORLD.gather(from_other_to_root, root = 0)
-    #print("For %d I have cont for cont power %s" % (iproc, str(cont_to_power_injection)))
+    
     toBcast = None
     if(iproc == 0):
         toBcast = [toSend]
     power_injection_to_cont = MPI.COMM_WORLD.bcast(toBcast, root = 0)
-   # print("For %d I have power %s" %(iproc, str(power_injection_to_cont)))
+   
     interface_y = None
     if(iproc == 0):
         interface_y = [x for x in cont_to_power_injection if x is not None]
     else:
         interface_y = power_injection_to_cont
-    #print("For %d i have interface beign %s" % (iproc, str(interface_y)))
+    
     return(interface_y)
     
 def interface_dotProd(interface_y, Hips):
+    '''
+    convenience  function for dot produce at the interface
+    Args:
+        interface_y (scipy.sparse or numpy matrix): interface_y variables per report/website
+        Hips (scipy.sparse or numpy matrix): Hips variables per report/website
+
+    Result:
+        (float): result of the interface dot product between interface_y and Hips variables
+    '''
     adjust_left = 0
     for index in range(0, len(Hips)):
-     #   print("HIPS shape: %s, interfafce shape: %s" % (str(Hips[index].shape), str(interface_y[index].shape)))
+     
         temp = Hips[index] * interface_y[index]
-	#print('hi')	
+	
         adjust_left += temp
     return(adjust_left)
             
 
 def find_regrouping(model):
-    '''For the last level after eliminating lambda, now group so that 
-    the thetas/nus are grouped based on contigency number. This is similar 
-    to the other ordering function and should find a way to refactor'''
+    '''
+    give the model data, finds a suitable regrouping of the variables
 
-    # TODO: Mixed up the row and col here :(
+    Args:
+        model (scipy.sparse or numpy matrix): model data matrix
+    
+    Result:
+        inds_info_col (list or numpy array of scipy.sparse or numpy matrices):
+            column related info about inds
+        inds_info_row (list or numpy array of scipy.sparse or numpy matrices):
+            row related info about inds
+        inds (dict of lists or numpy arrays):
+            dict, with key, value pairs where the values are an ordered list of 
+            indices defining the regrouping
+    '''
+
+    #For the last level after eliminating lambda, now group so that 
+    #the thetas/nus are grouped based on contigency number. This is similar 
+    #to the other ordering function and should find a way to refactor
     ncont = len(model[0][0][1][0]) - 1
     inds = {'deltaTheta': [], 'deltaNu': [],
             'rDual': [],  'rPri': []}

@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import profile_utils
 
@@ -39,12 +40,24 @@ if __name__ == '__main__':
     #global sample_bus_count
     #global sample_constr_count
 
-    sample_bus_count = 2224
-    sample_constr_count = 6
+    #sample_bus_count = 2224
+    sample_bus_count = int(sys.argv[1])
+    #sample_constr_count = 6
+    sample_constr_count = int(sys.argv[2])
 
-    fullParallel = 'false'
-    newtonParallel = 'false'
-    newton_nproc = 0
+    #fullParallel = 'false'
+    fullParallel = sys.argv[3]
+    #newtonParallel = 'false'
+    newtonParallel = sys.argv[4]
+
+    newton_nproc = int(sys.argv[5])
+#    newton_nproc = 0
+
+    print(sample_bus_count)
+    print(sample_constr_count)
+    print(fullParallel)
+    print(newtonParallel)
+    print(newton_nproc)
 
     #run_multilevel_example_filled = run_multilevel_example(sample_bus_count, sample_constr_count)
     #multilevel_check_residuals_filled = multilevel_check_residuals(sample_bus_count, sample_constr_count)
