@@ -51,7 +51,7 @@ def _load_data(bus_count, constr_count):
 
     return model_data, rhs_data, y0_data, constr_data
 
-def _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel, newton_nproc):
+def _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel, newton_nproc, grouping = 'standard'):
     '''
     Given the model, Y0 variables (per paper) variables, constraint data file matrix
     the newton block diagonal matrix per paper.
@@ -74,7 +74,7 @@ def _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel
     else:
         logging.info('construct in serial mode')
         newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
-    inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
+    inds, nrows = permute_NewtonBDMatrix(model_data, grouping)    
 
     newton_matrix = permute_sparse_matrix(newton_matrix, inds[0], inds[1])    
     rhs_data = rhs_data[inds[0]]
@@ -134,7 +134,7 @@ def _solver(iproc, combined, inds, nrows, model_data, fullParallel = False):
             return None
 
         
-def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False, newton_nproc = 0):
+def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False, newton_nproc = 0, grouping = None):
 
     # load data, construct newton matrix, solve newton step
     nproc = MPI.COMM_WORLD.Get_size()
@@ -145,10 +145,15 @@ def solve(bus_count, constr_count, fullParallel = False, newtonParallel = False,
     inds = None
     nrows = None
     model_data = None
+    if(grouping == None):
+        grouping = "standard"
+        if(fullParallel):
+            grouping = "grouped"
     if iproc == 0:
         #master node
         model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
-        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel = newtonParallel, newton_nproc=newton_nproc)
+        splits, inds, nrows = _construct_newton(model_data, rhs_data, y0_data, constr_data, newtonParallel = newtonParallel, newton_nproc=newton_nproc, 
+                                                 grouping = grouping)
 
     combined = _descend_level(iproc, splits)
 
