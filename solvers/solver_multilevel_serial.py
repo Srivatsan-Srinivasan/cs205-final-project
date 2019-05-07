@@ -16,6 +16,7 @@ from .utils import calculate_residuals
 from scipy import sparse
 
 from .solver_utils import construct_NewtonBDMatrix
+from .solver_utils import construct_NewtonBDMatrix_PARALLEL
 from .solver_utils import permute_NewtonBDMatrix
 from .solver_utils import multigrid
 from .solver_utils import permute_sparse_matrix
@@ -45,7 +46,7 @@ def _load_data(bus_count, constr_count):
 
     return model_data, rhs_data, y0_data, constr_data
 
-def _construct_newton(model_data, y0_data, constr_data):
+def _construct_newton(model_data, y0_data, constr_data, newtonParallel=False, newton_nproc=0):
     '''
     Given the model, Y0 variables (per report/website) variables, constraint data file matrix
     the newton block diagonal matrix per report/website.
@@ -54,6 +55,9 @@ def _construct_newton(model_data, y0_data, constr_data):
         model_data (scipy.sparse or numpy matrices): loaded model data file matrix
         y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per report/website
         constr_data (scipy.sparse or numpy matrices): constraint data file matrix
+        newtonParallel (bool): parallelize newton cosntruction step?
+        newton_nproc (int): number of processors to use in parallelization of newton construction step,
+        default (0) results in ful parallelizm
 
     Returns:
         newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per report/website
@@ -65,7 +69,12 @@ def _construct_newton(model_data, y0_data, constr_data):
     #construct newton block diagonal matrix per report/website
     logging.info('constructing newton matrix ...')
 
-    newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
+    if newtonParallel:
+        logging.info('construct in parallel mode')
+        newton_matrix = construct_NewtonBDMatrix_PARALLEL(model_data, y0_data, constr_data, newton_nproc)
+    else:
+        logging.info('construct in serial mode')
+        newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
 
     inds, nrows = permute_NewtonBDMatrix(model_data, 'standard')    
 
@@ -97,7 +106,7 @@ def _solver(newton_matrix, inds, nrows, rhs_data):
 
     return soln
 
-def solve(bus_count, constr_count):
+def solve(bus_count, constr_count, newtonParallel=False, newton_nproc=0):
     '''
     Given the number of busses and the number of constraints for power network, creates and solve the
     appropriate newton step.
@@ -105,6 +114,7 @@ def solve(bus_count, constr_count):
     Args:
         bus_count (int): number of busses in power network
         constr_count (int): number of constraints in power network
+        newtonParallel (bool): parallelize newton cosntruction step?
 
     Returns:
         soln (scipy.sparse or numpy matrix): Solution to the system of equations.
@@ -113,6 +123,6 @@ def solve(bus_count, constr_count):
     # load data, construct newton matrix, solve newton step
     model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)
 
-    newton_matrix, inds, nrows = _construct_newton(model_data, y0_data, constr_data)
+    newton_matrix, inds, nrows = _construct_newton(model_data, y0_data, constr_data, newtonParallel, newton_nproc)
 
     return _solver(newton_matrix, inds, nrows, rhs_data)
