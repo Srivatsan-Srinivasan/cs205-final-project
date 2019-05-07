@@ -11,7 +11,7 @@ This repository will be used to commit code necessary for the final project of C
 
 * Google slides for the proposal : https://docs.google.com/presentation/d/1oGa-gHbte9kbHfcSGOF94_0M-nd7p2r2Ky5b_dz2hU8/edit?usp=sharing
 
-* Overleaf link for the design presentation : https://www.overleaf.com/6991635993rpjtwjzbgmfg
+* Overleaf link for the final presentation, poster, report : https://www.overleaf.com/4973698375xwjqbstbnfxp
 
 ![alt text](https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/imgs/profile_example.png)
 
