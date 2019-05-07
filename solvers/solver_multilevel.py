@@ -1,5 +1,5 @@
 '''
-SERIAL MULTILEVEL SOLVER
+PARALLEL MULTILEVEL SOLVER
 
 Parallel Codes for Multi-Level Algebraic Solver for Parallelized Newton Step 
 in Security Constrained Optimal Power Flow

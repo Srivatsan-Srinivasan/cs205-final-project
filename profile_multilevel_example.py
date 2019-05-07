@@ -1,72 +1,89 @@
+'''
+PARALLEL MULTILEVEL SOLVER
+
+Parallel Codes for Multi-Level Algebraic Solver for Parallelized Newton Step 
+in Security Constrained Optimal Power Flow
+
+CS205 Spring 2019, Final Project
+Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
+'''
+
 import os
 import sys
 import logging
 import profile_utils
 
-#from functools import partial
-from solvers import solver_multilevel
-
-#sample_bus_count = None
-#sample_constr_count = None
-
 def run_multilevel_example():
-    logging.info('RUNNING PARALLEL MULTI-LEVEL SOLVER')
+    '''    
+    runs the parallel multilevel newton step solver, helper function for profilign the newton step solver
 
-    #run some sample from the dataset
-    #sample_bus_count = 189
-    #sample_constr_count = 5
+    Args:
+        sample_bus_count (int): the number of busses in the power network
+        sample_constr_count (int): the number of constraints in the power network
+        fullParallel (bool): parallelize block 3 as well as block 2 in the solver ? (see report/website)
+        newtonParallel (bool): parallelize generation of the newton step matrix?
+        newton_nproc (int): number of procs to use in parallelization of newton step matrix. 0 defaults to full parallization
+
+    Returns:
+        nothing. executes the wrapper for the fully parallelized version of the newton step solver using mpirun        
+    '''
+    logging.info('RUNNING PARALLEL MULTI-LEVEL SOLVER')
+    
 
     #solve the system
     os.system('mpirun -n {} python -u multilevel_example_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count, fullParallel, newtonParallel, newton_nproc))
 
-    #solver_multilevel.solve(sample_bus_count, sample_constr_count)
-
 def multilevel_check_residuals():
-    logging.info('RUNNING PARALLEL MULTI-LEVEL SOLVER')
+    '''    
+    runs the parallel multilevel newton step solver, helper function for profilign the residuals of the newton step solver
 
-    #run some sample from the dataset
-    #sample_bus_count = 189
-    #sample_constr_count = 5
+    Args:
+        sample_bus_count (int): the number of busses in the power network
+        sample_constr_count (int): the number of constraints in the power network
+        fullParallel (bool): parallelize block 3 as well as block 2 in the solver ? (see report/website)
+        newtonParallel (bool): parallelize generation of the newton step matrix?
+        newton_nproc (int): number of procs to use in parallelization of newton step matrix. 0 defaults to full parallization
+
+    Returns:
+        nothing. executes the residual wrapper for the fully parallelized version of the newton step solver using mpirun
+    '''
+    logging.info('RUNNING PARALLEL MULTI-LEVEL SOLVER')
 
     #solve the system
     os.system('mpirun -n {} python -u multilevel_example_residuals_wrapper.py {} {} {} {} {}'.format(sample_constr_count + 2, sample_bus_count, sample_constr_count, fullParallel, newtonParallel, newton_nproc))
 
-    #solver_multilevel.solve(sample_bus_count, sample_constr_count)
-
 if __name__ == '__main__':
+    '''
+    Given the number of constraints in the network, number of busses and various parallelization options, executes the parallel multigrid solver.
+
+    Args:
+        sample_bus_count (int): number of busses in the power network
+        sample_costr_count (int): number of constraints for the power network
+        fullParallel (bool): parallelize block 3 as well as block 2 in the solver ? (see report/website)
+        newtonParallel (bool): parallelize generation of the newton step matrix?
+        newton_nproc (int): number of procs to use in parallelization of newton step matrix. 0 defaults to full parallization
+
+    Returns:
+        Nothing. profiles the code.
+    '''
     logging.basicConfig(format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 
     #run some sample from the dataset
-    #global sample_bus_count
-    #global sample_constr_count
 
-    #sample_bus_count = 2224
-    sample_bus_count = int(sys.argv[1])
+    #sample_bus_count = 2224    
     #sample_constr_count = 6
-    sample_constr_count = int(sys.argv[2])
-
     #fullParallel = 'false'
-    fullParallel = sys.argv[3]
     #newtonParallel = 'false'
+    #newton_nproc = 0
+
+    sample_bus_count = int(sys.argv[1])
+    sample_constr_count = int(sys.argv[2])
+    fullParallel = sys.argv[3]
     newtonParallel = sys.argv[4]
-
     newton_nproc = int(sys.argv[5])
-#    newton_nproc = 0
 
-    print(sample_bus_count)
-    print(sample_constr_count)
-    print(fullParallel)
-    print(newtonParallel)
-    print(newton_nproc)
-
-    #run_multilevel_example_filled = run_multilevel_example(sample_bus_count, sample_constr_count)
-    #multilevel_check_residuals_filled = multilevel_check_residuals(sample_bus_count, sample_constr_count)
-
-    #profile_utils.profile_funcalls(run_multilevel_example)
-    #profile_utils.viz_funcalls()
-
-    #profile_utils.profile_callgraph(run_multilevel_example)
-    #profile_utils.profile_memory(run_multilevel_example)
+    #profile the time taken for the program to execute
     profile_utils.profile_time(run_multilevel_example)
-    #profile_utils.check_residuals(run_multilevel_example, sample_bus_count, sample_constr_count)
+
+    #profile the residuals (a check of the accuracy of the solution) of the calculation
     #multilevel_check_residuals()
