@@ -920,7 +920,7 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
 
         if(add_back_in):
             Ai[f_len:, f_len:] +=  Hips[0]
-        M_2 = sparse.linalg.spilu(Ai + sparse.eye(Ai.shape[0])*1e-6)
+        M_2 = sparse.linalg.spilu(Ai)
         M = sparse.linalg.LinearOperator(Ai.shape, M_2.solve)
         r = sparse.linalg.gmres(Ai,combined,M=M)[0]
         #r = sparse.linalg.gmres(Ai, combined)[0]
