@@ -920,13 +920,13 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
 
         if(add_back_in):
             Ai[f_len:, f_len:] +=  Hips[0]
-        M_2 = sparse.linalg.spilu(Ai + sparse.eye(Ai.shape[0])*1e-10)
+        M_2 = sparse.linalg.spilu(Ai + sparse.eye(Ai.shape[0])*1e-6)
         M = sparse.linalg.LinearOperator(Ai.shape, M_2.solve)
         r = sparse.linalg.gmres(Ai,combined,M=M)[0]
         #r = sparse.linalg.gmres(Ai, combined)[0]
         
         Aicut = Ai[-g_len:, -g_len:] 
-        M_2cut = sparse.linalg.spilu(Aicut + sparse.eye(Aicut.shape[0])*1e-10)
+        M_2cut = sparse.linalg.spilu(Aicut)
         Mcut = sparse.linalg.LinearOperator(Aicut.shape, M_2cut.solve)
 
     (Hi, dx, Bi, Hi) = (None, None, None, None)
