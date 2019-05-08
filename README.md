@@ -43,7 +43,7 @@ Implementations of the various versions of the solvers fall into the pattern `\s
 
 These newton step solvers can be involed by running either `some_solver_example.py` to just run the solver or to profile the solver, a user can change the profilers being used and run `profile_some_solver_example.py`. For example, for the baseline profiler, see `profile_baseline_example.py` and for the profiler for the fully parallelized multigrid, see `profile_multilevel_example.py`. Please note that for the fully parallelized version, we have a more limited set of tested profilers (only time and residual profilers) because of complications with mpirun/mpiexec. These driver scripts expect user arguments for the characteristics of the power network to run on, parallelization options, etc. which will be discussed below. Overally, the typical arrangement of the code in terms of the actual call graph is visualized below.
 
-![alt text](https://i.imgur.com/2sL7tws.png)
+![alt text](/imgs/call_graph.png?raw=true)
 
 This call graph is an example of one of the profilers that we offer for serial codes! It was used heavily to inform our choice of parallelization.
 
