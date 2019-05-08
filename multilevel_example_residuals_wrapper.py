@@ -36,4 +36,4 @@ def run_multilevel_example_residuals(bus_count, constr_count, fullParallel, newt
 if __name__ == '__main__':
 	sys.argv[3] = sys.argv[3].lower() == 'true'
 	sys.argv[4] = sys.argv[4].lower() == 'true'
-	run_multilevel_example(int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]))
+	run_multilevel_example_residuals(int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]))

@@ -14,7 +14,7 @@ import profile_utils
 from solvers import solver_baseline
 
 def run_baseline_example():
-        '''
+    '''
     Runs baseline solver given bus count and constraint count.
 
     Args:

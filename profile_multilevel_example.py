@@ -86,4 +86,4 @@ if __name__ == '__main__':
     profile_utils.profile_time(run_multilevel_example)
 
     #profile the residuals (a check of the accuracy of the solution) of the calculation
-    #multilevel_check_residuals()
+    multilevel_check_residuals()

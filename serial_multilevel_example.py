@@ -13,27 +13,27 @@ import logging
 from solvers import solver_multilevel_serial
 
 def run_serial_multilevel_example():
-	'''
-	Runs the serial solver (optionally using the newton generation parallelization) given bus count, constraint count and options about parallelization.
-	
-	Args:
-		sample_bus_count (int): number of busses in the power network
-		sample_constr_count (int): number of constraints in the power network
-		newtonParllel (bool): to parallelize the newton matrix generation step
-		newton_nproc (int): number of processors to use in newton generation parallelization. setting to 0 results in full parallelization
+    '''
+    Runs the serial solver (optionally using the newton generation parallelization) given bus count, constraint count and options about parallelization.
+    
+    Args:
+        sample_bus_count (int): number of busses in the power network
+        sample_constr_count (int): number of constraints in the power network
+        newtonParllel (bool): to parallelize the newton matrix generation step
+        newton_nproc (int): number of processors to use in newton generation parallelization. setting to 0 results in full parallelization
 
-	Returns:
-		Nothing, just calls the newton step solver.		
-	'''
-	#Runs the serial version of the multi level solver given the bus count, constraint count, and options for parallelization of newton generation    
-	logging.basicConfig(format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
+    Returns:
+        Nothing, just calls the newton step solver.     
+    '''
+    #Runs the serial version of the multi level solver given the bus count, constraint count, and options for parallelization of newton generation    
+    logging.basicConfig(format = "%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 
-	logging.info('RUNNING SERIAL MULTI-LEVEL SOLVER')
+    logging.info('RUNNING SERIAL MULTI-LEVEL SOLVER')
 
-	#run some sample from the dataset
-	#sample_bus_count = 189
-	#sample_constr_count = 5
-	#newtonParallel = 'false'
+    #run some sample from the dataset
+    #sample_bus_count = 189
+    #sample_constr_count = 5
+    #newtonParallel = 'false'
     #newton_nproc = 0
 
     sample_bus_count = int(sys.argv[1])
@@ -43,8 +43,8 @@ def run_serial_multilevel_example():
 
     newtonParallel = newtonParallel.lower() == 'true'
 
-	#solve the system
-	solver_multilevel_serial.solve(sample_bus_count, sample_constr_count, newtonParallel, newton_nproc)
+    #solve the system
+    solver_multilevel_serial.solve(sample_bus_count, sample_constr_count, newtonParallel, newton_nproc)
 
 if __name__ == '__main__':
-	run_serial_multilevel_example()
+    run_serial_multilevel_example()

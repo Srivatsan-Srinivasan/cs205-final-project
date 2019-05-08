@@ -51,18 +51,18 @@ if __name__ == '__main__':
     newtonParallel = newtonParallel.lower() == 'true'
 
     #profile function calls
-    #profile_utils.profile_funcalls(run_serial_multilevel_example)
+    profile_utils.profile_funcalls(run_serial_multilevel_example)
     #trim the profile of function calls to most interesting groupings
-    #profile_utils.viz_funcalls()
+    profile_utils.viz_funcalls()
 
     #profile the call graph
-    #profile_utils.profile_callgraph(run_serial_multilevel_example)
+    profile_utils.profile_callgraph(run_serial_multilevel_example)
 
     #profile the memory usage of the program
-    #profile_utils.profile_memory(run_serial_multilevel_example)
+    profile_utils.profile_memory(run_serial_multilevel_example)
 
     #profile the time taken for the program to execute
     profile_utils.profile_time(run_serial_multilevel_example)
     
     #profile the residuals (a check of the accuracy of the solution) of the calculation
-    #profile_utils.check_residuals(run_serial_multilevel_example, sample_bus_count, sample_constr_count)
+    profile_utils.check_residuals(run_serial_multilevel_example, sample_bus_count, sample_constr_count)
