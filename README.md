@@ -86,7 +86,7 @@ All our experiments had a setup as follows :  the PyMP based parallelization use
 
 For example, to repeat the experiments for the fullest extent of parallelization for the largest problem:
 
-`srun -p shared --pty --ntasks=8 --ntasks-per-node=1 --cpus-per-task=7 --mem-per-cpu=1500 -t 0-00:30  /bin/bash` to request the appropriate resources (note that we always restrict the total amount of memory per node to 12GB). Notice the use of 7 (K+1) cores per node and 8 (K+2) nodes for our expected problem size of K=8 contengencies with 2224 busses.
+`srun -p shared --pty --ntasks=8 --ntasks-per-node=1 --cpus-per-task=7 --mem-per-cpu=1500 -t 0-00:30  /bin/bash` to request the appropriate resources (note that we always restrict the total amount of memory per node to 12GB). Notice the use of 7 (K+1) cores per node and 8 (K+2) nodes for our expected problem size of K=6 contengencies with 2224 busses.
 
 To run the profiler to get the execution time, execute the profiler script:
 
