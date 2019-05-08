@@ -1,17 +1,19 @@
-# cs205-final-project
-This repository will be used to commit code necessary for the final project of CS205 course. Contributors are
+# CS205 Spring 2019, Final Project
+# Authors: Aditya Karan, Srivatsan Srinivasan, Cory Williams, Manish Reddy Vuyyuru
 
-1. Srivatsan Srinivasan
+* Proposal Google Slides: https://docs.google.com/presentation/d/1oGa-gHbte9kbHfcSGOF94_0M-nd7p2r2Ky5b_dz2hU8/edit?usp=sharing
+* Design Overleaf Slides: https://www.overleaf.com/6991635993rpjtwjzbgmfg
+* Project Report/Website: https://srivatsan-srinivasan.github.io/cs205-final-project/
 
-2. Manish Reddy Vuyyuru 
+# Compute Environment
 
-3. Aditya Karan 
+All codes were profiled on Harvard's Odyssey Compute Infrastructure.
 
-4. Cory Williams
+## Environment Setup
+To setup the appropriate environment 
 
-* Google slides for the proposal : https://docs.google.com/presentation/d/1oGa-gHbte9kbHfcSGOF94_0M-nd7p2r2Ky5b_dz2hU8/edit?usp=sharing
 
-* Overleaf link for the design presentation : https://www.overleaf.com/6991635993rpjtwjzbgmfg
+
 
 ![alt text](https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/imgs/profile_example.png)
 
