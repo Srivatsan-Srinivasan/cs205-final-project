@@ -27,8 +27,8 @@ def _load_data(bus_count, constr_count):
 
     Returns:
         model_data (numpy matrix): loaded model data file matrix
-        rhs_data (numpy matrix): RHS variables (per paper) variables data file matrix
-        y0_data (numpy matrix): Y0 variables (per paper) variables data file matrix
+        rhs_data (numpy matrix): RHS variables (per report/website) variables data file matrix
+        y0_data (numpy matrix): Y0 variables (per report/website) variables data file matrix
         constr_data (numpy matrix): constraint data file matrix
     '''
 
@@ -44,20 +44,20 @@ def _load_data(bus_count, constr_count):
 
 def _construct_newton(model_data, y0_data, constr_data):
     '''
-    Given the model, Y0 variables (per paper) variables, constraint data file matrix
-    the newton block diagonal matrix per paper.
+    Given the model, Y0 variables (per report/website) variables, constraint data file matrix
+    the newton block diagonal matrix per report/website.
 
     Args:
         model_data (scipy.sparse or numpy matrices): loaded model data file matrix
-        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per paper
+        y0_data (scipy.sparse or numpy matrices): Y0 variables data file matrix per report/website
         constr_data (scipy.sparse or numpy matrices): constraint data file matrix
 
     Returns:
-        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per paper
+        newton_matrix (scipy.sparse or numpy matrices): newton block diagonal matrix per report/website
     '''
 
 
-    #construct newton block diagonal matrix per paper
+    #construct newton block diagonal matrix per report/website
     logging.info('constructing newton matrix ...')
 
     newton_matrix = construct_NewtonBDMatrix(model_data, y0_data, constr_data)
@@ -68,15 +68,15 @@ def _construct_newton(model_data, y0_data, constr_data):
 
 def _solver(newton_matrix, rhs_data):
     '''
-    Given the newton block diagonal matrix per paper, RHS variables (per paper) solves
+    Given the newton block diagonal matrix per report/website, RHS variables (per report/website) solves
     the system of equations.
 
     Args:
-        newton_matrix:
-        rhs_data:
+        newton_matrix (scipy.sparse or numpy matrix): newton block diagonal matrix (per report/website)
+        rhs_data (scipy.sparse or numpy matrix): RHS variables (per report/website)
 
     Returns:
-        soln: Solution to the system of equatoins.
+        soln (scipy.sparse or numpy matrix): Solution to the system of equatoins.
     '''
 
     #naively find the least-squares solution to the system of equations.
@@ -89,6 +89,17 @@ def _solver(newton_matrix, rhs_data):
     return soln
 
 def solve(bus_count, constr_count):
+    '''
+    Given the number of busses and the number of constraints for power network, creates and solve the
+    appropriate newton step.
+
+    Args:
+        bus_count (int): number of busses in power network
+        constr_count (int): number of constraints in power network
+
+    Returns:
+        soln (scipy.sparse or numpy matrix): Solution to the system of equations.
+    '''
 
     # load data, construct newton matrix, solve newton step
     model_data, rhs_data, y0_data, constr_data = _load_data(bus_count, constr_count)

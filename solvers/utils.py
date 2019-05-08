@@ -23,8 +23,8 @@ def get_filepaths(bus_count, constr_count, directory):
 
     Returns:
         model_fname (string): full form filepath to model data file
-        rhs_fname (string): full form filepath to RHS variables (per paper) variables data file
-        y0_fname (string): full form filepath to Y0 variables (per paper) variables data file
+        rhs_fname (string): full form filepath to RHS variables (per report/website) variables data file
+        y0_fname (string): full form filepath to Y0 variables (per report/website) variables data file
         constr_fname (string): full form filepath to constraint data file
     '''
 
@@ -43,14 +43,14 @@ def load_filepaths(model_fname, rhs_fname, y0_fname, constr_fname):
 
     Args:
         model_fname (string): full form filepath to model data file
-        rhs_fname (string): full form filepath to RHS variables (per paper) variables data file
-        y0_fname (string): full form filepath to Y0 variables (per paper) variables data file
+        rhs_fname (string): full form filepath to RHS variables (per report/website) variables data file
+        y0_fname (string): full form filepath to Y0 variables (per report/website) variables data file
         constr_fname (string): full form filepath to constraint data file
 
     Returns:
         model_data (numpy matrix): loaded model data file matrix
-        rhs_data (numpy matrix): RHS variables (per paper) variables data file matrix
-        y0_data (numpy matrix): Y0 variables (per paper) variables data file matrix
+        rhs_data (numpy matrix): RHS variables (per report/website) variables data file matrix
+        y0_data (numpy matrix): Y0 variables (per report/website) variables data file matrix
         constr_data (numpy matrix): constraint data file matrix
     '''
             
