@@ -13532,8 +13532,8 @@ After solving $\mathbf{u}^1,\mathbf{y}^1$ in the terminal step, to ascend to the
 <center>Figure 4: compute times using various blocks of parallelization</center><p>Note that in this figure and the proceeding figures, "K" is used to denote the number of contingencies. Using Python Multiprocessing proved to minimally improve the total runtime; this is mainly due to the fact that PyMP was used for a portion of the program that did not originally contribute to the majority of the compute time. Furthermore, using MPI in Block 2 (non-terminal level) had minimal impact. The majority of the improvement came from utilizing distributed memory at the terminal level where significant set of local and interface variables are solved and naturally, parallelizing this portion had maximal impact on our speedups.</p>
 <p>Furthermore, the beneficial effects of parallelism can be observed when increasing the problem size. In our case, our problem size can be increased, both by increasing the number of buses or the number of contingencies. Figure 5 below shows how the speedup of the program alters with the number of buses and contingencies.</p>
 <p><img src="http://drive.google.com/uc?export=view&id=1jrd8jitFsHveoMKQhXkygzESGnyJ-lZj"></p>
-<center>Figure 5: Speedups vs. contingencies with varying problem sizes</center><p>We also finally compare the relative advantages of using our parallelized multigrid solver compared to using a serial multigrid solver and to using scipy's sparse system solver. Figure ~\ref{fig:totaltime} below indicates that with larger number of contingencies, our solver has the lowest run-times. This result is interesting because of two reasons - scipy solver internally parallelizes operations across cores within the same node and also, we found that residuals from the scipy solver was as bad as the residuals from our distributed solution, if not worse.</p>
-<p><img src="../../imgs/totaltime.png"></p>
+<center>Figure 5: Speedups vs. contingencies with varying problem sizes</center><p>We also finally compare the relative advantages of using our parallelized multigrid solver compared to using a serial multigrid solver and to using scipy's sparse system solver. Figure 6 below indicates that with larger number of contingencies, our solver has the lowest run-times. This result is interesting because of two reasons - scipy solver internally parallelizes operations across cores within the same node and also, we found that residuals from the scipy solver was as bad as the residuals from our distributed solution, if not worse.</p>
+<p><img src="http://drive.google.com/uc?export=view&id=1AlI119qBXHqd4zxmorm3Tcs5gleuwzqq"></p>
 <center>Figure 6: Total runtimes using various solvers</center>
 </div>
 </div>
@@ -13549,6 +13549,7 @@ After solving $\mathbf{u}^1,\mathbf{y}^1$ in the terminal step, to ascend to the
 <p>We also observed the effects of parallelization only when the system became sufficiently large (for e.g. with 6 contingencies and 2224 buses). We believe this was because of two reasons - i) for the smaller systems, the communication and synchronization overheads were trumping any advantages that parallelization provides in terms of speedup and ii) larger sparse systems are all the more likely to be ill-conditioned than smaller sparse systems, thus leading to poorer convergence. Thus, from our experiments, we realize that the need for parallelization always depends on the computational workload that each problem component warrants and thus, grows with the problem size.</p>
 <p><strong>Notes on Numerical Stability</strong></p>
 <p>Notwithstanding the run-time benefits of parallelization, the accuracy of our solution tended to perform marginally worse than the serial multilevel (based on residuals) - we believe that this could be attributed to the poorly conditioned sparse system matrices. Given that this process runs iteratively in the distributed implementation (between the contingency and power injection processors), there are multiple iterative solves of the interface variables and multiple significant communication/synchronization steps - an ill-conditioned matrix can lead to accumulating residuals in an iterative process like ours and could be a reason for our residuals to be non-trivial.  Further work needs to be done to improve the numerical accuracy of the solution - mostly by investing efforts in designing a more thorough preconditioning schemes. It is worth noting, however, that typical built-in direct solvers (scipy.sparse etc.) also tend to perform fairly poorly - and in general across all sparse solvers, getting better handles of condition numbers of a sparse operations is a standard issue when working with this type of structure.</p>
+<p><em>Note: description of the software and compute infrastructure is in the appendix</em></p>
 
 </div>
 </div>
@@ -13581,8 +13582,8 @@ After solving $\mathbf{u}^1,\mathbf{y}^1$ in the terminal step, to ascend to the
 <div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
 </div><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h1 id="Appendix-">Appendix <a name="Appendix" /><a class="anchor-link" href="#Appendix-">&#182;</a></h1><h3 id="Source-Code-and-Evaluation-">Source Code and Evaluation <a name="SourceCode" /><a class="anchor-link" href="#Source-Code-and-Evaluation-">&#182;</a></h3><p>Please refer to the Github README for a more in-depth guide to the repo: \url{<a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/README.md}">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/README.md}</a> \</p>
-<p>We evaluated our code through a check on the residuals of the solution. This was computed via the frobenius norm of $ A  x  - B $ where $x$ is the proposed solution by a solver. The implementation of this can be found in the function calculate residuals in the utils library in the solvers library \url{<a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/solvers/utils.py}">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/solvers/utils.py}</a> and examples of how to invoke our residual profiler can be found in the example scripts. For example,  see the multilevel_check_residuals function (in \url{<a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile\_multilevel\_example.py}">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile\_multilevel\_example.py}</a>) or the check_residuals functions implemented in the profiler utilities (in \url{<a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile\_baseline\_example.py}">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile\_baseline\_example.py}</a>).</p>
+<h1 id="Appendix-">Appendix <a name="Appendix" /><a class="anchor-link" href="#Appendix-">&#182;</a></h1><h3 id="Source-Code-and-Evaluation-">Source Code and Evaluation <a name="SourceCode" /><a class="anchor-link" href="#Source-Code-and-Evaluation-">&#182;</a></h3><p>Please refer to the Github README for a more in-depth guide to the repo: <a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/README.md">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/README.md</a></p>
+<p>We evaluated our code through a check on the residuals of the solution. This was computed via the frobenius norm of $ A  x  - B $ where $x$ is the proposed solution by a solver. The implementation of this can be found in the function calculate residuals in the utils library in the solvers library <a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/solvers/utils.py}">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/solvers/utils.py}</a> and examples of how to invoke our residual profiler can be found in the example scripts. For example,  see the multilevel_check_residuals function (in <a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile_multilevel_example.py">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile_multilevel_example.py</a>) or the check_residuals functions implemented in the profiler utilities (in <a href="https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile_baseline_example.py">https://github.com/Srivatsan-Srinivasan/cs205-final-project/blob/master/profile_baseline_example.py</a>).</p>
 <p>We noticed that our solvers were plagued by non-trivial residuals. Upon further investigation, we determined that the root cause seemed to be driven by system specific details. An simple direct solve implementation of the solvers using purely the Scipy library and an implementation of the multigrid solver purely in MATLAB all demonstrated similar non trivial residuals.</p>
 <h3 id="Software-Design-and-How-to-Use-Our-Software-">Software Design and How to Use Our Software <a name="SoftwareDesign" /><a class="anchor-link" href="#Software-Design-and-How-to-Use-Our-Software-">&#182;</a></h3><p>Our software implements several version of newton step solvers. The solvers can be run at several different extents of parallelism. All versions of the implements solvers expose a very similar interface. The implementation of the solvers can be found in the 'solvers' folder. Notice that all the solvers, the baseline solver, the serial solver (with optional parallelism at block 1), the parallel solver (with optional parallelism at block 1 and 3) implement a set of common functions that all solvers should have. Namely, all solvers implement the following functions:</p>
 <ol>
@@ -13605,21 +13606,21 @@ This function implements the logic to descend through block 2 in a distributed f
 <ol>
 <li><p>solver/solver_multilevel.py</p>
 
-<pre><code> 1. multilevel\_example.py
- 2. profile\_multilevel\_example.py</code></pre>
+<pre><code> 1. multilevel_example.py
+ 2. profile_multilevel_example.py</code></pre>
 </li>
 <li><p>solver/solver_multilevel_serial.py</p>
 
-<pre><code> 1. serial\_multilevel\_example.py
- 2. profile\_serial\_multilevel\_example.py</code></pre>
+<pre><code> 1. serial_multilevel_example.py
+ 2. profile_serial_multilevel_example.py</code></pre>
 </li>
 <li>solver/solver_baseline.py
-<pre><code> 1. baseline\_example.py
- 2. profile\_baseline\_example.py</code></pre>
+<pre><code> 1. baseline_example.py
+ 2. profile_baseline_example.py</code></pre>
 </li>
 </ol>
 <p>Again, the common profiler utilities have been moved into profiler library file profile_utils.py.</p>
-<p>Specifically, again, for the fully parallelized multilevel solver, running with a bus size of 2224 and 6 contingencies with parallelization at blocks 1, 2, 3, to just run the solver, you would do <code>python multilevel\_example.py</code> and to run different profilers on the script, you would edit the profiler driver script and run it, <code>python profile\_multilevel\_example.py</code>. For more details, please refer to the docstring in the codes and especially, the repo's README.</p>
+<p>Specifically, again, for the fully parallelized multilevel solver, running with a bus size of 2224 and 6 contingencies with parallelization at blocks 1, 2, 3, to just run the solver, you would do <code>python multilevel_example.py</code> and to run different profilers on the script, you would edit the profiler driver script and run it, <code>python profile_multilevel_example.py</code>. For more details, please refer to the docstring in the codes and especially, the repo's README.</p>
 <h3 id="Technical-Details-about-the-Compute-Infrastructrue-">Technical Details about the Compute Infrastructrue <a name="Odyssey" /><a class="anchor-link" href="#Technical-Details-about-the-Compute-Infrastructrue-">&#182;</a></h3><p>We used the Harvard Odyssey Cluster as our sole compute infrastructure resource. All experiments and results reported herein were executed on this cluster. The hardware specs are listed below. Please note that these are the hardware specs available on each node, refer to the Github README for full details.</p>
 <ol>
 <li>Model: Harvard Odyssey Cluster</li>
@@ -13637,6 +13638,19 @@ information can be found below:</p>
 
 </div>
 </div>
+</div>
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+<div class="prompt input_prompt">In&nbsp;[&nbsp;]:</div>
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span> 
+</pre></div>
+
+    </div>
+</div>
+</div>
+
 </div>
     </div>
   </div>
