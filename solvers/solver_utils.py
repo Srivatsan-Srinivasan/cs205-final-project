@@ -1066,10 +1066,19 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
     (L, U, L_inner, U_inner, r) = (None, None, None, None, None)
     
     if(useSchurs):
-
         r = sparse.linalg.gmres(Ai, combined)[0]
-    (Hi, dx, Bi, Hi) = (None, None, None, None)
-     
+    (M, omega) = (None, None)
+    if(not useSchurs):
+        Hi = Ai[len(fi):, :len(fi)]
+#            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
+ #           Bi = Ai[:len(fi), :len(fi)]
+        HiT = Ai[:len(fi), len(fi):]
+        print(Ai)
+
+        Bni = sparse.linalg.inv(Ai[:len(fi), :len(fi)])
+       # plt.spy(Bni)
+        M = Hi * Bni * HiT
+        omega = -gi + Hi * Bni * fi
   
     if(yguess == None):
         yguess = np.zeros_like(gi)
@@ -1090,13 +1099,8 @@ def gmres_solver_wrapper(Ai, fi, gi, Hips, useSchurs, yguess = None, niter = 10,
             yguess_new = sparse.linalg.gmres(Ai, combined - adjust_left, Pr, restart = None)[0]
             
         else:
-            Hi = Ai[len(fi):, :len(fi)]
-            dx = np.linalg.lstsq(Hi.todense(), gi - adjust_left)[0]
-            Bi = Ai[:len(fi), :len(fi)]
-            HiT = Ai[:len(fi), len(fi):]
-            yguess_new = np.linalg.lstsq(HiT.todense(), (fi - Bi * dx))[0]
-        
-        yguess = np.reshape(yguess_new, yguess.shape)    
+            yguess_new = sparse.linalg.gmres(M, omega - adjust_left, yguess, restart = None)[0]
+            yguess = np.reshape(yguess_new, yguess.shape)    
         
     
     #Now commmunicate what's left
